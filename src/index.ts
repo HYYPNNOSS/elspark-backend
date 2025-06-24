@@ -23,7 +23,7 @@ const app = express();
 const prisma = new PrismaClient();
 const server = http.createServer(app);
 
-const allowedOrigin = 'http://localhost:3000';
+const allowedOrigin = 'https://elspark-frontend.vercel.app';
 
 app.use(cors({
   origin: allowedOrigin,
