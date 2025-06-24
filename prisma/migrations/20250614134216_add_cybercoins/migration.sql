@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `users` ADD COLUMN `cyberCoins` INTEGER NOT NULL DEFAULT 10;
