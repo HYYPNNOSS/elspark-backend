@@ -23,22 +23,38 @@ const app = express();
 const prisma = new PrismaClient();
 const server = http.createServer(app);
 
-const allowedOrigin = 'https://elspark-frontend.vercel.app';
+const allowedOrigins = [
+  'https://elspark-frontend.vercel.app',
+  'http://localhost:3000',
+];
+
 
 app.use(cors({
-  origin: allowedOrigin,
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigin,
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
-  
 });
+
 setupGameWebSocket(io);
 
 app.use(express.json()); 
