@@ -2,6 +2,31 @@
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
+import multer from 'multer';
+import path from 'path';
+
+// Configure multer for profile picture uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/profiles'); // Make sure this directory exists
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'profile-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,7 +34,7 @@ const prisma = new PrismaClient();
 router.get("/", async (req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, username: true, email: true },
+      select: { id: true, username: true, email: true, bio: true, profilePicture: true },
     });
     res.json(users);
   } catch (error) {
@@ -101,6 +126,7 @@ router.get("/:username", async (req: Request, res: Response) => {
         username: true,
         email: true,
         profilePicture: true,
+        bio: true,
         createdAt: true,
         updatedAt: true,
         online: true,
@@ -215,6 +241,83 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
   } catch (error) {
     console.error("Failed to send cyber coins:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
+  const { id } = req.params;
+  const { bio } = req.body;
+  const userId = req.user.id;
+
+  // Check if user is updating their own bio
+  if (parseInt(id) !== userId) {
+    res.status(403).json({ error: "You can only update your own bio" });
+    return;
+  }
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: parseInt(id) },
+      data: { bio },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        bio: true,
+        profilePicture: true,
+        cyberCoins: true,
+      }
+    });
+
+    res.status(200).json({ 
+      message: "Bio updated successfully", 
+      user: updatedUser 
+    });
+  } catch (error) {
+    console.error("Error updating bio:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/:id/profile-picture", verifyToken, upload.single('profilePicture'), async (req: any, res: Response) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  // Check if user is updating their own profile picture
+  if (parseInt(id) !== userId) {
+    res.status(403).json({ error: "You can only update your own profile picture" });
+    return;
+  }
+
+  if (!req.file) {
+    res.status(400).json({ error: "No image file provided" });
+    return;
+  }
+
+  try {
+    const profilePicturePath = `/uploads/profiles/${req.file.filename}`;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: parseInt(id) },
+      data: { profilePicture: profilePicturePath },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        bio: true,
+        profilePicture: true,
+        cyberCoins: true,
+      }
+    });
+
+    res.status(200).json({ 
+      message: "Profile picture updated successfully", 
+      user: updatedUser,
+      profilePictureUrl: profilePicturePath
+    });
+  } catch (error) {
+    console.error("Error updating profile picture:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

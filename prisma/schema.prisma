@@ -67,6 +67,8 @@ model User {
   profilePicture String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  bio      String?
+
 
   online   Boolean @default(false)
   isonrand Boolean @default(false)
@@ -91,6 +93,8 @@ model User {
 
   resetTokens PasswordResetToken[]
   aiMessages  AIMsg[]
+  aiSessions  AISession[]
+
 
   @@map("users")
 }
@@ -230,9 +234,24 @@ model AIMsg {
   userId    Int
   sender    String //here nariman either 'user' or 'bot'
   message   String
+  sessionId String? 
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("ai_messages")
+}
+
+model AISession {
+  id        String   @id @default(uuid())
+  userId    Int
+  botId     Int
+  duration  Int // in minutes
+  startTime DateTime @default(now())
+  endTime   DateTime
+  isActive  Boolean  @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_sessions")
 }
