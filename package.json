@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --respawn --clear src/index.ts",
-    "build": "tsc",
+    "prisma:generate": "prisma generate",
+    "build": "npm run prisma:generate && tsc",
     "start": "node dist/index.js",
     "studio": "dotenv -e .env -- prisma studio",
     "prisma": "prisma"
