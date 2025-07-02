@@ -32,7 +32,7 @@ export class GameQueueService {
   }
 
   async addToQueue(userId: number, socket: Socket): Promise<void> {
-    // Always update socket connection first
+    
     this.socketConnections.set(userId, socket);
     console.log("=================socket=================");
     console.log(gameQueueService.socketConnections.keys())

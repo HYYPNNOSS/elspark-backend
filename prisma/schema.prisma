@@ -233,7 +233,7 @@ model AIMsg {
   id        Int      @id @default(autoincrement())
   userId    Int
   sender    String //here nariman either 'user' or 'bot'
-  message   String
+  message   String   @db.Text
   sessionId String? 
   createdAt DateTime @default(now())
 
