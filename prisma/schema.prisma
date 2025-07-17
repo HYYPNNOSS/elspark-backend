@@ -95,6 +95,12 @@ model User {
   aiMessages  AIMsg[]
   aiSessions  AISession[]
 
+  isMooshi     Boolean  @default(false)
+  isApproved   Boolean  @default(false)
+  color        String?  
+  mooshiNumber Int?     @unique
+  personality   Json?
+
 
   @@map("users")
 }
