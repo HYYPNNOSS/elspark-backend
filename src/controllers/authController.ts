@@ -132,6 +132,142 @@ export const signup = async (req: Request, res: Response) => {
   }
 }
 
+export const mooshiSignup = async (req: Request, res: Response) => {
+  const { email, username, password, color } = req.body;
+
+  if (!email || !username || !password || !color) {
+    return res.status(400).json({ error: 'All fields are required (email, username, password, color)' });
+  }
+
+  try {
+    const existingUser = await prisma.user.findFirst({
+      where: { OR: [{ email }, { username }] },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email or username already exists' });
+    }
+
+    // Generate a unique mooshiNumber
+    const lastMooshi = await prisma.user.findFirst({
+      where: { isMooshi: true },
+      orderBy: { mooshiNumber: 'desc' },
+    });
+    const mooshiNumber = lastMooshi?.mooshiNumber ? lastMooshi.mooshiNumber + 1 : 1;
+
+    const finalUsername = `${username}${mooshiNumber}`;
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        username: finalUsername,
+        password: hashedPassword,
+        isMooshi: true,
+        color,
+        mooshiNumber,
+      },
+    });
+
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+
+    return res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        mooshiNumber: user.mooshiNumber,
+        color: user.color,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+export const importMoshis = async (req: Request, res: Response) => {
+  try {
+    const adminSecret = req.headers['x-admin-secret'];
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { moshis } = req.body; // Array of { email, password, username, bio, color, mooshiNumber }
+
+    if (!Array.isArray(moshis) || moshis.length === 0) {
+      return res.status(400).json({ error: 'Moshis array is required' });
+    }
+
+    const createdMoshis = [];
+
+    for (const moshi of moshis) {
+      const {
+        email,
+        password,
+        username,
+        bio,
+        color,
+        mooshiNumber
+      } = moshi;
+
+      if (!email || !password || !username || !color || !mooshiNumber) {
+        continue; // skip incomplete rows
+      }
+
+      // Check if already exists
+      const existing = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { email },
+            { username },
+            { mooshiNumber: Number(mooshiNumber) },
+          ],
+        },
+      });
+
+      if (existing) {
+        console.log(`Skipping existing mooshi: ${email}`);
+        continue;
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      const newMoshi = await prisma.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          username,
+          bio,
+          color,
+          mooshiNumber: Number(mooshiNumber),
+          isMooshi: true,
+          isApproved: true,
+        },
+      });
+
+      createdMoshis.push(newMoshi);
+    }
+
+    return res.json({
+      message: `Imported ${createdMoshis.length} Mooshi accounts.`,
+      moshis: createdMoshis.map(m => ({
+        id: m.id,
+        username: m.username,
+        email: m.email,
+        mooshiNumber: m.mooshiNumber,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+
+
 export const signin = async (req: Request, res: Response) => {
   const { email, password } = req.body
 
