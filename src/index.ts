@@ -16,10 +16,12 @@ import postCollections from './routes/postCollections'
 import aiSessionsRoute from './routes/aiSessions';
 import aiChatRoute from './routes/aiChat';
 import aiMessagesRoute from './routes/aiMessages';
+import adminRoutes from './routes/adminRoutes'
 // import ffmpeg from 'fluent-ffmpeg';
 import ffprobe from 'ffprobe';
 import ffprobeStatic from 'ffprobe-static';
 import multer from 'multer';
+import mooshiRoutes from './routes/mooshi';
 
 // import MP4Box from 'mp4box';
 
@@ -33,6 +35,7 @@ import { setupGameWebSocket } from './sockets/game.socket';
 
 import friendRoute from './routes/friendRoutes'
 import path from 'path';
+
 
 
 
@@ -77,6 +80,8 @@ setupGameWebSocket(io);
 
 app.use(express.json()); 
 app.use('/api/users', router); 
+app.use('/api/admin', adminRoutes); 
+
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', userMessages);
 app.use('/api/posts', postRoutes);
@@ -89,7 +94,7 @@ app.use('/uploads', express.static('uploads'));
 app.use('/api/ai-sessions', aiSessionsRoute);
 app.use('/api/ai-chat', aiChatRoute);
 app.use('/api/ai-messages', aiMessagesRoute);
-
+app.use('/api/mooshi', mooshiRoutes);
 
 app.use('/videos', express.static(path.join(__dirname, 'livevid')));
 
