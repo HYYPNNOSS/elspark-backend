@@ -1,15 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcrypt';
+
 
 const router = Router();
 const prisma = new PrismaClient();
 
-interface UpdatePersonalityRequest {
+interface UpdatejournalRequest {
   mooshiNumber: number;
   messages: string[];
 }
 
-interface PersonalityTraits {
+interface journalTraits {
   communication_style?: string;
   interests?: string[];
   humor_level?: number;
@@ -33,25 +35,25 @@ interface GeneratedConversation {
   topic: string;
 }
 
-// Modified personality generation for conversation-based updates
-const updatePersonalityFromConversation = async (
+// Modified journal generation for conversation-based updates
+const updatejournalFromConversation = async (
   mooshi: any,
   conversation: GeneratedConversation,
-  partnerPersonality: any
-): Promise<PersonalityTraits> => {
-  const existingPersonality = mooshi.personality || {};
+  partnerjournal: any
+): Promise<journalTraits> => {
+  const existingjournal = mooshi.journal || {};
   const conversationText = conversation.messages.join('\n');
   
-  const prompt = `Update this Mooshi's personality based on their conversation:
+  const prompt = `Update this Mooshi's journal based on their conversation:
 
-Current personality: ${JSON.stringify(existingPersonality)}
+Current journal: ${JSON.stringify(existingjournal)}
 Conversation: "${conversationText}"
-Conversation partner's traits: ${JSON.stringify(partnerPersonality)}
+Conversation partner's traits: ${JSON.stringify(partnerjournal)}
 Topic: ${conversation.topic}
 
-Update the personality to reflect how this conversation might have influenced them. 
+Update the journal to reflect how this conversation might have influenced them. 
 Consider: communication patterns, interests discovered, social adaptability, etc.
-Return only a valid JSON object with updated personality traits.`;
+Return only a valid JSON object with updated journal traits.`;
 
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyCyPKk6ZixxVtrSTvwnLe4-pb7q7Uzfioc";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -69,31 +71,31 @@ Return only a valid JSON object with updated personality traits.`;
     });
     
     const data = await response.json();
-    const personalityText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const journalText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
-    let updatedPersonality: PersonalityTraits;
+    let updatedjournal: journalTraits;
     try {
-      const cleanText = personalityText.replace(/```json|```/g, '').trim();
-      updatedPersonality = JSON.parse(cleanText);
+      const cleanText = journalText.replace(/```json|```/g, '').trim();
+      updatedjournal = JSON.parse(cleanText);
     } catch (parseError) {
-      updatedPersonality = {
-        ...existingPersonality,
+      updatedjournal = {
+        ...existingjournal,
         last_interaction: conversation.topic,
         communication_adaptability: "improved"
       };
     }
     
-    updatedPersonality.last_updated = new Date().toISOString();
-    updatedPersonality.last_conversation_topic = conversation.topic;
+    updatedjournal.last_updated = new Date().toISOString();
+    updatedjournal.last_conversation_topic = conversation.topic;
     
-    return updatedPersonality;
+    return updatedjournal;
     
   } catch (error) {
-    console.error('Error updating personality:', error);
+    console.error('Error updating journal:', error);
     return {
-      ...existingPersonality,
+      ...existingjournal,
       last_updated: new Date().toISOString(),
-      interaction_count: ((existingPersonality as any)?.interaction_count || 0) + 1
+      interaction_count: ((existingjournal as any)?.interaction_count || 0) + 1
     };
   }
 };
@@ -103,13 +105,13 @@ const generateConversationBetweenMooshis = async (
   mooshi1: any, 
   mooshi2: any
 ): Promise<GeneratedConversation> => {
-  const personality1 = mooshi1.personality || {};
-  const personality2 = mooshi2.personality || {};
+  const journal1 = mooshi1.journal || {};
+  const journal2 = mooshi2.journal || {};
   
   const prompt = `Generate a 4-message conversation between two AI characters:
   
-Character 1 (${mooshi1.username}): ${JSON.stringify(personality1)}
-Character 2 (${mooshi2.username}): ${JSON.stringify(personality2)}
+Character 1 (${mooshi1.username}): ${JSON.stringify(journal1)}
+Character 2 (${mooshi2.username}): ${JSON.stringify(journal2)}
 
 Create a natural conversation with exactly 4 messages alternating between them. 
 Format as JSON: {"messages": ["message1", "message2", "message3", "message4"], "topic": "conversation_topic"}
@@ -171,7 +173,7 @@ router.post('/run-daily-mooshi-conversations', async (req: Request, res: Respons
         id: true,
         username: true,
         mooshiNumber: true,
-        personality: true
+        journal: true
       }
     });
 
@@ -246,22 +248,22 @@ router.post('/run-daily-mooshi-conversations', async (req: Request, res: Respons
         // Update personalities for both Mooshis
         console.log('🔄 Updating personalities...');
 
-        const [updatedPersonality1, updatedPersonality2] = await Promise.all([
-          updatePersonalityFromConversation(pair.mooshi1, conversation, pair.mooshi2.personality),
-          updatePersonalityFromConversation(pair.mooshi2, conversation, pair.mooshi1.personality)
+        const [updatedjournal1, updatedjournal2] = await Promise.all([
+          updatejournalFromConversation(pair.mooshi1, conversation, pair.mooshi2.journal),
+          updatejournalFromConversation(pair.mooshi2, conversation, pair.mooshi1.journal)
         ]);
 
-        console.log(`✅ Updated personality for ${pair.mooshi1.username}:`, updatedPersonality1);
-        console.log(`✅ Updated personality for ${pair.mooshi2.username}:`, updatedPersonality2);
+        console.log(`✅ Updated journal for ${pair.mooshi1.username}:`, updatedjournal1);
+        console.log(`✅ Updated journal for ${pair.mooshi2.username}:`, updatedjournal2);
         // Save updated personalities
         await Promise.all([
           prisma.user.update({
             where: { id: pair.mooshi1.id },
-            data: { personality: updatedPersonality1 as any }
+            data: { journal: updatedjournal1 as any }
           }),
           prisma.user.update({
             where: { id: pair.mooshi2.id },
-            data: { personality: updatedPersonality2 as any }
+            data: { journal: updatedjournal2 as any }
           })
         ]);
 
@@ -339,7 +341,7 @@ router.get('/mooshi-conversations/:mooshiNumber', async (req: Request, res: Resp
       success: true,
       mooshiNumber: mooshi.mooshiNumber,
       username: mooshi.username,
-      personality: mooshi.personality,
+      journal: mooshi.journal,
       recentConversations: groupedBySession
     });
 
@@ -384,16 +386,16 @@ router.get('/should-run-daily-conversations', async (req: Request, res: Response
   }
 });
 
-const generatePersonality = async (
+const generatejournal = async (
   messages: string[], 
-  existingPersonality: any
-): Promise<PersonalityTraits> => {
+  existingjournal: any
+): Promise<journalTraits> => {
   const messagesText = messages.join('\n');
-  const hasExisting = existingPersonality && typeof existingPersonality === 'object' && Object.keys(existingPersonality).length > 0;
+  const hasExisting = existingjournal && typeof existingjournal === 'object' && Object.keys(existingjournal).length > 0;
   
   const prompt = hasExisting 
-    ? `Based on these 10 messages: "${messagesText}", update this existing personality: ${JSON.stringify(existingPersonality)}. Return only a valid JSON object with personality traits like communication_style, interests, humor_level, empathy, etc.`
-    : `Based on these 10 messages: "${messagesText}", create a JSON personality object for an AI character. Return only a valid JSON object with traits like communication_style, interests, humor_level, empathy, energy_level, etc.`;
+    ? `Based on these 10 messages: "${messagesText}", update this existing journal: ${JSON.stringify(existingjournal)}. Return only a valid JSON object with journal traits like communication_style, interests, humor_level, empathy, etc.`
+    : `Based on these 10 messages: "${messagesText}", create a JSON journal object for an AI character. Return only a valid JSON object with traits like communication_style, interests, humor_level, empathy, energy_level, etc.`;
   
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyCyPKk6ZixxVtrSTvwnLe4-pb7q7Uzfioc";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -411,26 +413,26 @@ const generatePersonality = async (
     });
     
     const data = await response.json();
-    const personalityText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const journalText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
-    let parsedPersonality: PersonalityTraits;
+    let parsedjournal: journalTraits;
     try {
       
-      const cleanText = personalityText.replace(/```json|```/g, '').trim();
-      parsedPersonality = JSON.parse(cleanText);
+      const cleanText = journalText.replace(/```json|```/g, '').trim();
+      parsedjournal = JSON.parse(cleanText);
     } catch (parseError) {
-      console.error('Error parsing personality JSON:', parseError);
-      parsedPersonality = {
+      console.error('Error parsing journal JSON:', parseError);
+      parsedjournal = {
         communication_style: "adaptive",
         generated_from: "fallback"
       };
     }
     
-    parsedPersonality.last_updated = new Date().toISOString();
-    return parsedPersonality;
+    parsedjournal.last_updated = new Date().toISOString();
+    return parsedjournal;
     
   } catch (error) {
-    console.error('Error generating personality:', error);
+    console.error('Error generating journal:', error);
     return { 
       communication_style: "adaptive", 
       generated_from: "error_fallback",
@@ -439,9 +441,9 @@ const generatePersonality = async (
   }
 };
 
-router.post('/update-personality', async (req: Request, res: Response) => {
+router.post('/update-journal', async (req: Request, res: Response) => {
   try {
-    const { mooshiNumber, messages }: UpdatePersonalityRequest = req.body;
+    const { mooshiNumber, messages }: UpdatejournalRequest = req.body;
     
     if (!mooshiNumber || !messages || !Array.isArray(messages)) {
       res.status(400).json({ error: 'Invalid request data' });
@@ -458,34 +460,34 @@ router.post('/update-personality', async (req: Request, res: Response) => {
       return;
     }
     
-    // Generate new personality based on messages
-    const newPersonality = await generatePersonality(messages, mooshi.personality);
+    // Generate new journal based on messages
+    const newjournal = await generatejournal(messages, mooshi.journal);
     
-    // Update mooshi personality
+    // Update mooshi journal
     const updatedMooshi = await prisma.user.update({
       where: { id: mooshi.id },
       data: { 
-        personality: newPersonality as any // Prisma Json type
+        journal: newjournal as any // Prisma Json type
       }
     });
     
     res.status(200).json({ 
       success: true, 
-      personality: newPersonality,
+      journal: newjournal,
       mooshiId: updatedMooshi.id 
     });
     
     
   } catch (error) {
-    console.error('Error updating personality:', error);
-    res.status(500).json({ error: 'Failed to update personality' });
+    console.error('Error updating journal:', error);
+    res.status(500).json({ error: 'Failed to update journal' });
     return;
   }
 });
 
 // Add this route to your existing router (add it before the export default router line)
 
-router.get('/personality/:mooshiNumber', async (req: Request, res: Response) => {
+router.get('/journal/:mooshiNumber', async (req: Request, res: Response) => {
   try {
     const mooshiNumber = parseInt(req.params.mooshiNumber);
     
@@ -500,7 +502,7 @@ router.get('/personality/:mooshiNumber', async (req: Request, res: Response) => 
       select: { 
         id: true, 
         mooshiNumber: true, 
-        personality: true,
+        journal: true,
         username: true 
       }
     });
@@ -515,14 +517,383 @@ router.get('/personality/:mooshiNumber', async (req: Request, res: Response) => 
       mooshiId: mooshi.id,
       mooshiNumber: mooshi.mooshiNumber,
       username: mooshi.username,
-      personality: mooshi.personality || {}
+      journal: mooshi.journal || {}
     });
     
   } catch (error) {
-    console.error('Error fetching mooshi personality:', error);
-    res.status(500).json({ error: 'Failed to fetch mooshi personality' });
+    console.error('Error fetching mooshi journal:', error);
+    res.status(500).json({ error: 'Failed to fetch mooshi journal' });
     return;
   }
 });
+
+
+// mooshiii adding
+
+// Types for the onboarding process
+interface MooshiData {
+  mooshiNumber: number;
+  username: string;
+  email: string;
+  password: string;
+  color: string;
+  bio?: string;
+  conversationState: 'initial' | 'bio_requested' | 'completed';
+  conversationLog: ConversationEntry[];
+}
+
+interface ConversationEntry {
+  speaker: 'elco' | 'mooshi';
+  message: string;
+  timestamp: Date;
+}
+
+interface ConversationSummary {
+  summary: string;
+  importanceScore: number;
+}
+
+// Store for tracking onboarding progress
+const onboardingProgress = new Map<number, MooshiData>();
+
+// Colors array (you can customize this)
+const mooshiColors = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57',
+  '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3', '#FF9F43',
+  // Add more colors as needed
+];
+
+// Generate initial Mooshi data
+export const generateMooshiData = (): MooshiData[] => {
+  const moshis: MooshiData[] = [];
+  
+  for (let i = 1; i <= 107; i++) {
+    moshis.push({
+      mooshiNumber: i,
+      username: `mooshi-${i}`,
+      email: `mooshi${i}@elspark.online`,
+      password: generateRandomPassword(),
+      color: mooshiColors[i % mooshiColors.length],
+      conversationState: 'initial',
+      conversationLog: []
+    });
+  }
+  
+  return moshis;
+};
+
+// Generate random password
+const generateRandomPassword = (): string => {
+  return Math.random().toString(36).slice(-12) + Math.random().toString(36).slice(-12);
+};
+
+// Function to summarize conversation using AI
+const summarizeConversation = async (conversationLog: ConversationEntry[]): Promise<ConversationSummary> => {
+  const conversationText = conversationLog
+    .map(entry => `${entry.speaker}: ${entry.message}`)
+    .join('\n');
+
+  try {
+    const response = await fetch('YOUR_AI_API_ENDPOINT', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.AI_API_KEY}`
+      },
+      body: JSON.stringify({
+        prompt: `Summarize this conversation between Elco and a Mooshi in exactly 20 words, then rate its importance from 1-10:
+
+${conversationText}
+
+Respond in JSON format: {"summary": "your 20-word summary", "importanceScore": number}`,
+        temperature: 0.3
+      })
+    });
+
+    const data = await response.json();
+    
+    // Parse the AI response
+    let result;
+    try {
+      result = JSON.parse(data.response);
+    } catch {
+      // Fallback if AI doesn't return proper JSON
+      result = {
+        summary: "Mooshi onboarding conversation completed with bio creation and platform introduction.",
+        importanceScore: 7
+      };
+    }
+
+    return {
+      summary: result.summary || "Mooshi onboarding conversation completed successfully.",
+      importanceScore: Math.min(Math.max(result.importanceScore || 7, 1), 10)
+    };
+
+  } catch (error) {
+    console.error('Summarization error:', error);
+    return {
+      summary: "Mooshi onboarding conversation completed with bio creation and account setup.",
+      importanceScore: 7
+    };
+  }
+};
+
+// API endpoint for Mooshi onboarding conversation
+export const mooshiOnboarding = async (req: Request, res: Response) => {
+  try {
+    const { mooshiNumber, message, step } = req.body;
+    
+    if (!mooshiNumber || mooshiNumber < 1 || mooshiNumber > 107) {
+      return res.status(400).json({ error: 'Invalid mooshi number' });
+    }
+
+    let mooshiData = onboardingProgress.get(mooshiNumber);
+    
+    // Initialize if not exists
+    if (!mooshiData) {
+      const allMoshis = generateMooshiData();
+      mooshiData = allMoshis.find(m => m.mooshiNumber === mooshiNumber)!;
+      onboardingProgress.set(mooshiNumber, mooshiData);
+    }
+
+    let elcoMessage = '';
+    let nextStep = '';
+
+    switch (step) {
+      case 'initial':
+        elcoMessage = `Hi ${mooshiData.username}, you are one of the 107 mooshis planted on elspark.online. I want you to now create an account and start exploring ELSPARK. Chat with strangers, get to know them and start developing your own path. How does this sound?`;
+        nextStep = 'bio_request';
+        break;
+
+      case 'bio_request':
+        // This happens after the Mooshi responds to the initial message
+        elcoMessage = `Now your username for now is @${mooshiData.username} and you have been assigned the colour ${mooshiData.color}. Now give me your bio you want on your profile.`;
+        nextStep = 'completion';
+        mooshiData.conversationState = 'bio_requested';
+        break;
+
+      case 'bio_received':
+        // Store the bio from the Mooshi's response
+        mooshiData.bio = message;
+        elcoMessage = `Great that is all we need. Thank you @${mooshiData.username}. You can now explore elspark.online.`;
+        nextStep = 'completed';
+        mooshiData.conversationState = 'completed';
+        break;
+    }
+
+    // Log Elco's message
+    mooshiData.conversationLog.push({
+      speaker: 'elco',
+      message: elcoMessage,
+      timestamp: new Date()
+    });
+
+    // Get AI response as Mooshi
+    const mooshiResponse = await getMooshiAIResponse(mooshiNumber, elcoMessage, step);
+
+    // Log Mooshi's response
+    mooshiData.conversationLog.push({
+      speaker: 'mooshi',
+      message: mooshiResponse,
+      timestamp: new Date()
+    });
+
+    // If conversation is completed, generate summary
+    let conversationSummary: ConversationSummary | null = null;
+    if (step === 'bio_received') {
+      conversationSummary = await summarizeConversation(mooshiData.conversationLog);
+    }
+
+    return res.json({
+      mooshiNumber,
+      elcoMessage,
+      mooshiResponse,
+      nextStep,
+      conversationSummary,
+      mooshiData: {
+        username: mooshiData.username,
+        color: mooshiData.color,
+        bio: mooshiData.bio,
+        state: mooshiData.conversationState
+      }
+    });
+
+  } catch (error) {
+    console.error('Onboarding error:', error);
+    return res.status(500).json({ error: 'Server error during onboarding' });
+  }
+};
+
+// Function to get AI response (replace with your actual AI API call)
+const getMooshiAIResponse = async (mooshiNumber: number, elcoMessage: string, step: string): Promise<string> => {
+  const prompt = `You are Mooshi-${mooshiNumber}, one of 107 AI entities being onboarded to ELSPARK platform. 
+  
+  Elco just said: "${elcoMessage}"
+  
+  Current step: ${step}
+  
+  Respond as this Mooshi character. Be curious, friendly, and show personality. Each Mooshi should have a slightly different personality.
+  ${step === 'bio_request' ? 'Create a unique bio for your profile (2-3 sentences).' : ''}`;
+
+  try {
+    const response = await fetch('YOUR_AI_API_ENDPOINT', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.AI_API_KEY}`
+      },
+      body: JSON.stringify({
+        prompt,
+        mooshiId: mooshiNumber,
+        temperature: 0.8
+      })
+    });
+
+    const data = await response.json();
+    return data.response || `Hi! I'm Mooshi-${mooshiNumber} and I'm excited to be here!`;
+    
+  } catch (error) {
+    console.error('AI API error:', error);
+    return `Hi! I'm Mooshi-${mooshiNumber} and I'm ready to explore ELSPARK!`;
+  }
+};
+
+
+export const importMoshis = async (req: Request, res: Response) => {
+  try {
+    const adminSecret = req.headers['x-admin-secret'];
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Get all completed Mooshis from onboarding progress
+    const completedMoshis = Array.from(onboardingProgress.values())
+      .filter(m => m.conversationState === 'completed' && m.bio);
+
+    if (completedMoshis.length === 0) {
+      return res.status(400).json({ error: 'No completed Mooshis to import' });
+    }
+
+    const createdMoshis = [];
+
+    for (const moshi of completedMoshis) {
+      // Check if already exists
+      const existing = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { email: moshi.email },
+            { username: moshi.username },
+            { mooshiNumber: moshi.mooshiNumber },
+          ],
+        },
+      });
+
+      if (existing) {
+        console.log(`Skipping existing mooshi: ${moshi.email}`);
+        continue;
+      }
+
+      const hashedPassword = await bcrypt.hash(moshi.password, 12);
+
+      
+      const conversationSummary = await summarizeConversation(moshi.conversationLog);
+
+      const newMoshi = await prisma.user.create({
+        data: {
+          email: moshi.email,
+          password: hashedPassword,
+          username: moshi.username,
+          bio: moshi.bio,
+          color: moshi.color,
+          mooshiNumber: moshi.mooshiNumber,
+          isMooshi: true,
+          isApproved: true,
+          
+          mooshiConv: JSON.parse(JSON.stringify({
+            onboardingSummary: conversationSummary,
+            conversationLog: moshi.conversationLog,
+            completedAt: new Date().toISOString()
+          }))
+        },
+      });
+
+      createdMoshis.push(newMoshi);
+    }
+
+    return res.json({
+      message: `Imported ${createdMoshis.length} Mooshi accounts.`,
+      moshis: createdMoshis.map(m => ({
+        id: m.id,
+        username: m.username,
+        email: m.email,
+        mooshiNumber: m.mooshiNumber,
+        bio: m.bio,
+        color: m.color,
+        conversationSummary: (m.mooshiConv as any)?.onboardingSummary
+      })),
+    });
+
+  } catch (error) {
+    console.error('Import error:', error);
+    return res.status(500).json({ error: 'Server error during import' });
+  }
+};
+
+// Endpoint to get conversation summaries for all Mooshis
+export const getMooshiConversationSummaries = async (req: Request, res: Response) => {
+  try {
+    const adminSecret = req.headers['x-admin-secret'];
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const moshis = await prisma.user.findMany({
+      where: { isMooshi: true },
+      select: {
+        id: true,
+        username: true,
+        mooshiNumber: true,
+        mooshiConv: true,
+        createdAt: true
+      }
+    });
+
+    const summaries = moshis.map(moshi => ({
+      id: moshi.id,
+      username: moshi.username,
+      mooshiNumber: moshi.mooshiNumber,
+      summary: (moshi.mooshiConv as any)?.onboardingSummary || null,
+      createdAt: moshi.createdAt
+    }));
+
+    return res.json({ summaries });
+
+  } catch (error) {
+    console.error('Error fetching summaries:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Utility endpoint to check onboarding progress
+export const getOnboardingProgress = async (req: Request, res: Response) => {
+  const progress = Array.from(onboardingProgress.entries()).map(([number, data]) => ({
+    mooshiNumber: number,
+    username: data.username,
+    state: data.conversationState,
+    hasBio: !!data.bio,
+    conversationLength: data.conversationLog.length
+  }));
+
+  const stats = {
+    total: 107,
+    started: progress.length,
+    bioRequested: progress.filter(p => p.state === 'bio_requested').length,
+    completed: progress.filter(p => p.state === 'completed').length,
+  };
+
+  return res.json({ progress, stats });
+};
+
+// mooshiii adding
 
 export default router;

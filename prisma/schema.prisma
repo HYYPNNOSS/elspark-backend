@@ -99,7 +99,8 @@ model User {
   isApproved   Boolean  @default(false)
   color        String?  
   mooshiNumber Int?     @unique
-  personality   Json?
+  journal   Json?
+  mooshiConv Json?
 
 
   @@map("users")

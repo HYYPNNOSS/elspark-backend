@@ -64,7 +64,8 @@ CREATE TABLE `users` (
     `isApproved` BOOLEAN NOT NULL DEFAULT false,
     `color` VARCHAR(191) NULL,
     `mooshiNumber` INTEGER NULL,
-    `personality` JSON NULL,
+    `journal` JSON NULL,
+    `mooshiConv` JSON NULL,
 
     UNIQUE INDEX `users_username_key`(`username`),
     UNIQUE INDEX `users_email_key`(`email`),
