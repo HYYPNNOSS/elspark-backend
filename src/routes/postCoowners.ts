@@ -5,20 +5,19 @@ import { verifyToken } from "../middlewares/authMiddleware";
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// Add coowner to a post
 // Add coowner to a post (requires 1 cyber coin payment to post owner)
 router.post("/coown/:postId", verifyToken, async (req: any, res) => {
-  const userId = req.user.id; 
+  const userId = req.user.id;
   const postId = Number(req.params.postId);
   const coinAmount = 1; // Fixed amount for co-owning
 
   try {
     // Get the post with author information
-    const post = await prisma.post.findUnique({ 
+    const post = await prisma.post.findUnique({
       where: { id: postId },
-      include: { author: true }
+      include: { author: true },
     });
-    
+
     if (!post) {
       res.status(404).json({ error: "Post not found" });
       return;
@@ -35,9 +34,9 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
       where: {
         postId_userId: {
           postId: postId,
-          userId: userId
-        }
-      }
+          userId: userId,
+        },
+      },
     });
 
     if (existingCoowner) {
@@ -48,7 +47,7 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
     // Get current user's balance
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, username: true, cyberCoins: true }
+      select: { id: true, username: true, cyberCoins: true },
     });
 
     if (!currentUser) {
@@ -58,7 +57,12 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
 
     // Check if user has enough cyber coins
     if (currentUser.cyberCoins < coinAmount) {
-      res.status(400).json({ error: "Insufficient cyber coins. You need 1 cyber coin to co-own this post." });
+      res
+        .status(400)
+        .json({
+          error:
+            "Insufficient cyber coins. You need 1 cyber coin to co-own this post.",
+        });
       return;
     }
 
@@ -67,38 +71,36 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
       // Deduct coin from current user
       prisma.user.update({
         where: { id: userId },
-        data: { cyberCoins: { decrement: coinAmount } }
+        data: { cyberCoins: { decrement: coinAmount } },
       }),
       // Add coin to post owner
       prisma.user.update({
         where: { id: post.authorId },
-        data: { cyberCoins: { increment: coinAmount } }
+        data: { cyberCoins: { increment: coinAmount } },
       }),
       // Create co-ownership record
       prisma.postCoowner.create({
         data: { postId, userId },
-      })
+      }),
     ]);
 
     // Get updated balance for response
     const updatedUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { cyberCoins: true }
+      select: { cyberCoins: true },
     });
 
-    res.json({ 
+    res.json({
       message: `You now co-own this post! 1 cyber coin sent to ${post.author.username}`,
       yourBalance: updatedUser?.cyberCoins,
       coinsSent: coinAmount,
-      postOwner: post.author.username
+      postOwner: post.author.username,
     });
-
   } catch (error: any) {
     console.error("Failed to co-own post:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
-
 
 router.get("/coowned/:targetId", verifyToken, async (req: any, res) => {
   const targetId = Number(req.params.targetId);
@@ -106,7 +108,7 @@ router.get("/coowned/:targetId", verifyToken, async (req: any, res) => {
   try {
     const coowned = await prisma.postCoowner.findMany({
       where: { userId: targetId },
-      include: { 
+      include: {
         post: {
           select: {
             id: true,

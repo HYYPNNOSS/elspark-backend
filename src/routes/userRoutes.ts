@@ -2,30 +2,30 @@
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
-import multer from 'multer';
-import path from 'path';
+import multer from "multer";
+import path from "path";
 
 // Configure multer for profile picture uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/profiles'); // Make sure this directory exists
+    cb(null, "uploads/profiles"); // Make sure this directory exists
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'profile-' + uniqueSuffix + path.extname(file.originalname));
-  }
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'));
+      cb(new Error("Only image files are allowed"));
     }
-  }
+  },
 });
 
 const router = express.Router();
@@ -34,7 +34,13 @@ const prisma = new PrismaClient();
 router.get("/", async (req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, username: true, email: true, bio: true, profilePicture: true },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        bio: true,
+        profilePicture: true,
+      },
     });
     // console.log(users);
     res.json(users);
@@ -43,7 +49,6 @@ router.get("/", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 router.get("/public_post", async (req, res) => {
   try {
@@ -74,7 +79,7 @@ router.get("/public_post", async (req, res) => {
   }
 });
 
-router.get("id/:id", async (req: Request, res: Response) => {
+router.get("/id/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
 
   try {
@@ -134,7 +139,7 @@ router.get("/:username", async (req: Request, res: Response) => {
         isonrand: true,
         cyberCoins: true,
         looking: true,
-        
+
         posts: {
           select: {
             id: true,
@@ -153,7 +158,7 @@ router.get("/:username", async (req: Request, res: Response) => {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    
+
     res.status(200).json({ user });
   } catch (err) {
     console.error("Error:", err);
@@ -168,17 +173,17 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
   // Validation
   if (!recipientId || !amount) {
     res.status(400).json({ error: "Recipient ID and amount are required" });
-    return
+    return;
   }
 
-  if (typeof amount !== 'number' || amount <= 0) {
+  if (typeof amount !== "number" || amount <= 0) {
     res.status(400).json({ error: "Amount must be a positive number" });
-    return
+    return;
   }
 
   if (senderId === recipientId) {
     res.status(400).json({ error: "Cannot send coins to yourself" });
-    return
+    return;
   }
 
   // Round to 2 decimal places to handle floating point precision
@@ -188,28 +193,28 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
     // Check if recipient exists
     const recipient = await prisma.user.findUnique({
       where: { id: recipientId },
-      select: { id: true, username: true, cyberCoins: true }
+      select: { id: true, username: true, cyberCoins: true },
     });
 
     if (!recipient) {
-       res.status(404).json({ error: "Recipient not found" });
-       return
+      res.status(404).json({ error: "Recipient not found" });
+      return;
     }
 
     // Check sender's balance
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
-      select: { id: true, username: true, cyberCoins: true }
+      select: { id: true, username: true, cyberCoins: true },
     });
 
     if (!sender) {
       res.status(404).json({ error: "Sender not found" });
-      return
+      return;
     }
 
     if (sender.cyberCoins < roundedAmount) {
-       res.status(400).json({ error: "Insufficient cyber coins" });
-       return
+      res.status(400).json({ error: "Insufficient cyber coins" });
+      return;
     }
 
     // Perform the transaction
@@ -217,28 +222,27 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
       // Deduct from sender
       prisma.user.update({
         where: { id: senderId },
-        data: { cyberCoins: { decrement: roundedAmount } }
+        data: { cyberCoins: { decrement: roundedAmount } },
       }),
       // Add to recipient
       prisma.user.update({
         where: { id: recipientId },
-        data: { cyberCoins: { increment: roundedAmount } }
-      })
+        data: { cyberCoins: { increment: roundedAmount } },
+      }),
     ]);
 
     // Get updated balances
     const updatedSender = await prisma.user.findUnique({
       where: { id: senderId },
-      select: { cyberCoins: true }
+      select: { cyberCoins: true },
     });
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: `Successfully sent ${roundedAmount} cyber coins to ${recipient.username}`,
       senderBalance: updatedSender?.cyberCoins,
       amountSent: roundedAmount,
-      recipient: recipient.username
+      recipient: recipient.username,
     });
-
   } catch (error) {
     console.error("Failed to send cyber coins:", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -267,12 +271,12 @@ router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
         bio: true,
         profilePicture: true,
         cyberCoins: true,
-      }
+      },
     });
 
-    res.status(200).json({ 
-      message: "Bio updated successfully", 
-      user: updatedUser 
+    res.status(200).json({
+      message: "Bio updated successfully",
+      user: updatedUser,
     });
   } catch (error) {
     console.error("Error updating bio:", error);
@@ -280,48 +284,54 @@ router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
   }
 });
 
-router.put("/:id/profile-picture", verifyToken, upload.single('profilePicture'), async (req: any, res: Response) => {
-  const { id } = req.params;
-  const userId = req.user.id;
+router.put(
+  "/:id/profile-picture",
+  verifyToken,
+  upload.single("profilePicture"),
+  async (req: any, res: Response) => {
+    const { id } = req.params;
+    const userId = req.user.id;
 
-  // Check if user is updating their own profile picture
-  if (parseInt(id) !== userId) {
-    res.status(403).json({ error: "You can only update your own profile picture" });
-    return;
+    // Check if user is updating their own profile picture
+    if (parseInt(id) !== userId) {
+      res
+        .status(403)
+        .json({ error: "You can only update your own profile picture" });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ error: "No image file provided" });
+      return;
+    }
+
+    try {
+      const profilePicturePath = `/uploads/profiles/${req.file.filename}`;
+
+      const updatedUser = await prisma.user.update({
+        where: { id: parseInt(id) },
+        data: { profilePicture: profilePicturePath },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          bio: true,
+          profilePicture: true,
+          cyberCoins: true,
+        },
+      });
+
+      res.status(200).json({
+        message: "Profile picture updated successfully",
+        user: updatedUser,
+        profilePictureUrl: profilePicturePath,
+      });
+    } catch (error) {
+      console.error("Error updating profile picture:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
-
-  if (!req.file) {
-    res.status(400).json({ error: "No image file provided" });
-    return;
-  }
-
-  try {
-    const profilePicturePath = `/uploads/profiles/${req.file.filename}`;
-
-    const updatedUser = await prisma.user.update({
-      where: { id: parseInt(id) },
-      data: { profilePicture: profilePicturePath },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        bio: true,
-        profilePicture: true,
-        cyberCoins: true,
-      }
-    });
-
-    res.status(200).json({ 
-      message: "Profile picture updated successfully", 
-      user: updatedUser,
-      profilePictureUrl: profilePicturePath
-    });
-  } catch (error) {
-    console.error("Error updating profile picture:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
+);
 
 router.get("/:username/posts", async (req: Request, res: Response) => {
   const { username } = req.params;
@@ -364,6 +374,51 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
   }
 });
 
+router.put(
+  "/:id",
+  verifyToken,
+  upload.single("profilePicture"),
+  async (req: any, res: Response) => {
+    const { id } = req.params;
+    const userId = req.user.id;
 
+    const bio = req.body.bio;
+    const profilePictureFile = req.file;
+
+    if (parseInt(id) !== userId) {
+      res.status(403).json({ error: "You can only update your own profile" });
+      return;
+    }
+
+    const updateData: any = {};
+    if (bio !== undefined) updateData.bio = bio;
+    if (profilePictureFile) {
+      updateData.profilePicture = `/uploads/profiles/${profilePictureFile.filename}`;
+    }
+
+    try {
+      const updatedUser = await prisma.user.update({
+        where: { id: parseInt(id) },
+        data: updateData,
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          bio: true,
+          profilePicture: true,
+          cyberCoins: true,
+        },
+      });
+
+      res.status(200).json({
+        message: "Profile updated successfully",
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
 
 export default router;
