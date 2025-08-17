@@ -89,6 +89,8 @@ model User {
 
   cyberCoins    Int            @default(10)
   gameStats     GameStats[]
+  notifications Notification[] 
+
   playerInGames PlayerInGame[]
 
   resetTokens PasswordResetToken[]
@@ -99,11 +101,27 @@ model User {
   isApproved   Boolean  @default(false)
   color        String?  
   mooshiNumber Int?     @unique
-  personality   Json?
+  journal   Json?
+  mooshiConv Json?
 
 
   @@map("users")
 }
+
+
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String   
+  message     String
+  user        User     @relation(fields: [userId], references: [id])
+  userId      Int      
+  postId      String?
+  commentId   String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
 
 model PostCollection {
   id        Int      @id @default(autoincrement())

@@ -50,6 +50,27 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
           replies: true
         }
       });
+
+      if (postId && !parentId) {
+        // Top-level comment on a post → notify post author
+        const post = await prisma.post.findUnique({
+          where: { id: postId },
+          select: { authorId: true }
+        });
+  
+        if (post && post.authorId !== userId) {
+          await prisma.notification.create({
+            data: {
+              type: "comment",
+              message: `New comment on your post: "${comment.content}"`,
+              userId: post.authorId,
+              postId: postId.toString(),
+              commentId: comment.id.toString()
+            }
+          });
+        }
+      } 
+     
   
       res.status(201).json(comment);
     } catch (error) {

@@ -112,14 +112,20 @@ export const signup = async (req: Request, res: Response) => {
   }
 
   try {
-    const existingUser = await prisma.user.findFirst({
-      where: { OR: [{ email }, { username }] },
+    // Check if email already exists
+    const emailExists = await prisma.user.findUnique({
+      where: { email },
     });
+    if (emailExists) {
+      return res.status(400).json({ error: "Email already exists" });
+    }
 
-    if (existingUser) {
-      return res
-        .status(400)
-        .json({ error: "Email or username already exists" });
+    // Check if username already exists
+    const usernameExists = await prisma.user.findUnique({
+      where: { username },
+    });
+    if (usernameExists) {
+      return res.status(400).json({ error: "Username already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -138,8 +144,23 @@ export const signup = async (req: Request, res: Response) => {
       token,
       user: { id: user.id, email: user.email, username: user.username },
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
+
+    // Prisma unique constraint violation
+    if (err.code === "P2002") {
+      if (err.meta && err.meta.target && Array.isArray(err.meta.target)) {
+        if (err.meta.target.includes("email")) {
+          return res.status(400).json({ error: "Email already exists" });
+        }
+        if (err.meta.target.includes("username")) {
+          return res.status(400).json({ error: "Username already exists" });
+        }
+      }
+      return res.status(400).json({ error: "Email or username already exists" });
+    }
+
+    // Other errors
     return res.status(500).json({ error: "Server error" });
   }
 };

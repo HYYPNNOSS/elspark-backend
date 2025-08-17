@@ -50,6 +50,23 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/notifications", verifyToken, async (req: any, res) => {
+  try {
+    const userId = req.user.id; // now safe because verifyToken runs first
+
+    const notifications = await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.status(200).json(notifications);
+  } catch (error) {
+    console.error("Error fetching notifications:", error);
+    res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+});
+
+
 router.get("/public_post", async (req, res) => {
   try {
     const publicPosts = await prisma.post.findMany({
