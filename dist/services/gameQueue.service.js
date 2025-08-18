@@ -22,7 +22,6 @@ class GameQueueService {
         return this.queue.includes(userId);
     }
     async addToQueue(userId, socket) {
-        // Always update socket connection first
         this.socketConnections.set(userId, socket);
         console.log("=================socket=================");
         console.log(exports.gameQueueService.socketConnections.keys());
