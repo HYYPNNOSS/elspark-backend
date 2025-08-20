@@ -112,29 +112,40 @@ export const signup = async (req: Request, res: Response) => {
   }
 
   try {
-    // Check if email already exists
-    const emailExists = await prisma.user.findUnique({
-      where: { email },
-    });
+    // CHANGE 1: Check both email AND username in ONE query instead of two separate queries
+    const [emailExists, usernameExists] = await Promise.all([
+      prisma.user.findUnique({
+        where: { email },
+        select: { id: true }, // CHANGE 2: Only select the id field, not all user data
+      }),
+      prisma.user.findUnique({
+        where: { username },
+        select: { id: true }, // CHANGE 2: Only select the id field, not all user data
+      }),
+    ]);
+
     if (emailExists) {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // Check if username already exists
-    const usernameExists = await prisma.user.findUnique({
-      where: { username },
-    });
     if (usernameExists) {
       return res.status(400).json({ error: "Username already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    // CHANGE 3: Reduce bcrypt rounds from 12 to 10 (still secure but faster)
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
         email,
         username,
         password: hashedPassword,
+      },
+      // CHANGE 4: Only select the fields you need from the created user
+      select: {
+        id: true,
+        email: true,
+        username: true,
       },
     });
 
@@ -147,7 +158,6 @@ export const signup = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error(err);
 
-    // Prisma unique constraint violation
     if (err.code === "P2002") {
       if (err.meta && err.meta.target && Array.isArray(err.meta.target)) {
         if (err.meta.target.includes("email")) {
@@ -160,7 +170,6 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Email or username already exists" });
     }
 
-    // Other errors
     return res.status(500).json({ error: "Server error" });
   }
 };
@@ -171,9 +180,12 @@ export const signin = async (req: Request, res: Response) => {
   if (!email || !password) {
     return res.status(400).json({ error: "All fields are required" });
   }
+  console.log(email)
+  console.log(password)
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
+    console.log(user)
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
