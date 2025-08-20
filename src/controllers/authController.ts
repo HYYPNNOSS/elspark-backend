@@ -96,6 +96,9 @@ export const resetPassword = async (req: Request, res: Response) => {
 };
 
 export const signup = async (req: Request, res: Response) => {
+  console.log("🚀 Signup started");
+  const startTime = Date.now();
+  
   const { email, username, password } = req.body;
 
   if (
@@ -112,17 +115,21 @@ export const signup = async (req: Request, res: Response) => {
   }
 
   try {
-    // CHANGE 1: Check both email AND username in ONE query instead of two separate queries
+    console.log("⏰ Starting database checks...");
+    const dbCheckStart = Date.now();
+    
     const [emailExists, usernameExists] = await Promise.all([
       prisma.user.findUnique({
         where: { email },
-        select: { id: true }, // CHANGE 2: Only select the id field, not all user data
+        select: { id: true },
       }),
       prisma.user.findUnique({
         where: { username },
-        select: { id: true }, // CHANGE 2: Only select the id field, not all user data
+        select: { id: true },
       }),
     ]);
+    
+    console.log(`✅ Database checks done in ${Date.now() - dbCheckStart}ms`);
 
     if (emailExists) {
       return res.status(400).json({ error: "Email already exists" });
@@ -132,31 +139,41 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Username already exists" });
     }
 
-    // CHANGE 3: Reduce bcrypt rounds from 12 to 10 (still secure but faster)
+    console.log("🔐 Starting password hashing...");
+    const hashStart = Date.now();
     const hashedPassword = await bcrypt.hash(password, 10);
+    console.log(`✅ Password hashed in ${Date.now() - hashStart}ms`);
 
+    console.log("👤 Creating user...");
+    const createStart = Date.now();
     const user = await prisma.user.create({
       data: {
         email,
         username,
         password: hashedPassword,
       },
-      // CHANGE 4: Only select the fields you need from the created user
       select: {
         id: true,
         email: true,
         username: true,
       },
     });
+    console.log(`✅ User created in ${Date.now() - createStart}ms`);
 
+    console.log("🎫 Creating token...");
     const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    const totalTime = Date.now() - startTime;
+    console.log(`🏁 Total signup time: ${totalTime}ms`);
 
     return res.status(201).json({
       token,
       user: { id: user.id, email: user.email, username: user.username },
     });
   } catch (err: any) {
-    console.error(err);
+    console.error("❌ Signup error:", err);
+    const totalTime = Date.now() - startTime;
+    console.log(`💥 Failed after: ${totalTime}ms`);
 
     if (err.code === "P2002") {
       if (err.meta && err.meta.target && Array.isArray(err.meta.target)) {

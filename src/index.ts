@@ -81,7 +81,9 @@ app.use("/uploads", express.static("uploads"));
 app.use("/api/ai-sessions", aiSessionsRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/ai-messages", aiMessagesRoute);
-
+app.get('/ping', (req, res) => {
+  res.json({ status: 'alive', time: new Date() });
+});
 app.use("/videos", express.static(path.join(__dirname, "livevid")));
 
 // Define types
