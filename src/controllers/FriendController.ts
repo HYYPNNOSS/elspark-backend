@@ -91,6 +91,8 @@ export const declineRequest = async (req: AuthRequest, res: Response) => {
 export const getPendingRequests = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
 
+  console.log(userId);
+
   try {
     const requests = await prisma.friendRequest.findMany({
       where: {
@@ -101,6 +103,8 @@ export const getPendingRequests = async (req: AuthRequest, res: Response) => {
         sender: { select: { id: true, username: true, profilePicture: true } },
       },
     });
+  console.log(requests);
+
     res.json(requests);
   } catch {
     res.status(500).json({ error: "Fetch failed" });

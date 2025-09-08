@@ -156,7 +156,7 @@ router.get("/:username", async (req: Request, res: Response) => {
         isonrand: true,
         cyberCoins: true,
         looking: true,
-
+        isApproved: true,
         posts: {
           select: {
             id: true,
@@ -437,5 +437,8 @@ router.put(
     }
   }
 );
+
+
+
 
 export default router;

@@ -59,6 +59,20 @@ enum GameStatus {
   ABANDONED
 }
 
+
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
 model User {
   id             Int      @id @default(autoincrement())
   username       String   @unique
@@ -86,6 +100,9 @@ model User {
   receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
   friends                Friendship[]    @relation("UserFriends")
   friendOf               Friendship[]    @relation("FriendOf")
+
+  following Follow[] @relation("UserFollowing")
+  followers Follow[] @relation("UserFollowers")
 
   cyberCoins    Int            @default(10)
   gameStats     GameStats[]

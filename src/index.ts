@@ -16,6 +16,7 @@ import postCollections from "./routes/postCollections";
 import aiSessionsRoute from "./routes/aiSessions";
 import aiChatRoute from "./routes/aiChat";
 import aiMessagesRoute from "./routes/aiMessages";
+import followRouter from "./routes/followRoutes";
 // import ffmpeg from 'fluent-ffmpeg';
 import ffprobe from "ffprobe";
 import ffprobeStatic from "ffprobe-static";
@@ -27,6 +28,7 @@ import { setupGameWebSocket } from "./sockets/game.socket";
 
 import friendRoute from "./routes/friendRoutes";
 import path from "path";
+import adminRoutes from "./routes/adminRoutes";
 
 dotenv.config();
 const app = express();
@@ -69,7 +71,11 @@ setupGameWebSocket(io);
 
 app.use(express.json());
 app.use("/api/users", router);
+app.use('/api/admin', adminRoutes); 
+
 app.use("/api/auth", authRoutes);
+app.use("/api/follow", followRouter);
+
 app.use("/api/messages", userMessages);
 app.use("/api/posts", postRoutes);
 app.use("/api/comments", commentsRouter);

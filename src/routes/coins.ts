@@ -10,7 +10,7 @@ interface AuthenticatedRequest extends Request {
   userId?: number;
 }
 
-// Mock middleware to simulate auth
+
 const mockAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   const userId = parseInt(req.headers['user-id'] as string);
   if (!userId) {
@@ -22,11 +22,15 @@ const mockAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction):
 };
 
 router.post('/buy', mockAuth, async (req: AuthenticatedRequest, res: Response) => {
+  console.log("amount");
+  
   const { amount } = req.body;
-  const validAmounts = [10, 20, 30, 40];
+  const validAmounts = [5, 10, 15, 20];
+  console.log(amount);
 
   if (!validAmounts.includes(amount)) {
     res.status(400).json({ message: 'Invalid amount' });
+    console.log("amount");
     return;
   }
 

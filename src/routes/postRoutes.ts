@@ -73,4 +73,272 @@ postRouter.post(
   }
 );
 
+
+postRouter.get(
+  "/:id",
+  verifyToken, 
+  async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    console.log("heyy")
+    
+    const postId = parseInt(id);
+
+    if (!postId || isNaN(postId)) {
+      res.status(400).json({ error: "Invalid post ID" });
+      return
+    }
+
+    try {
+      const post = await prisma.post.findUnique({
+        where: {
+          id: postId,
+        },
+        include: {
+          
+          author: {
+            select: {
+              id: true,
+              username: true,
+              profilePicture: true,
+              bio: true,
+              createdAt: true,
+            },
+          },
+          
+          coowners: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          },
+          
+          collections: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+            },
+          },
+          
+          comments: {
+            where: {
+              parentId: null, 
+            },
+            include: {
+              author: {
+                select: {
+                  id: true,
+                  username: true,
+                  profilePicture: true,
+                },
+              },
+              
+              replies: {
+                include: {
+                  author: {
+                    select: {
+                      id: true,
+                      username: true,
+                      profilePicture: true,
+                    },
+                  },
+                  replies: {
+                    include: {
+                      author: {
+                        select: {
+                          id: true,
+                          username: true,
+                          profilePicture: true,
+                        },
+                      },
+                    },
+                    orderBy: {
+                      createdAt: "asc",
+                    },
+                  },
+                },
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "desc", 
+            },
+          },
+          // Post in collections relationship
+          PostInCollection: {
+            include: {
+              collection: {
+                select: {
+                  id: true,
+                  title: true,
+                  userId: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!post) {
+        res.status(404).json({ error: "Post not found" });
+        return
+      }
+
+      // Optional: Check if post is private and user has access
+      const user = (req as any).user;
+      if (post.isPrivate) {
+        const hasAccess = 
+          user?.id === post.authorId || // Author
+          post.coowners.some(coowner => coowner.userId === user?.id); // Co-owner
+        
+        if (!hasAccess) {
+          res.status(403).json({ error: "Access denied to private post" });
+          return
+        }
+      }
+
+      // Add some computed fields for convenience
+      const enrichedPost = {
+        ...post,
+        stats: {
+          commentCount: await prisma.comment.count({
+            where: { postId: post.id },
+          }),
+          coownerCount: post.coowners.length,
+          collectionCount: post.collections.length,
+        },
+        hasMedia: {
+          hasImage: !!post.imageUrl,
+          hasVideo: !!post.videoUrl,
+        },
+      };
+
+      res.status(200).json(enrichedPost);
+    } catch (error) {
+      console.error("Failed to fetch post:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+// Alternative version that gets ALL comments in a flat structure (if you prefer)
+postRouter.get(
+  "/:id/with-flat-comments",
+  verifyToken,
+  async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    const postId = parseInt(id);
+
+    if (!postId || isNaN(postId)) {
+      res.status(400).json({ error: "Invalid post ID" });
+      return;
+    }
+
+    try {
+      const post = await prisma.post.findUnique({
+        where: {
+          id: postId,
+        },
+        include: {
+          author: {
+            select: {
+              id: true,
+              username: true,
+              profilePicture: true,
+              bio: true,
+            },
+          },
+          coowners: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          },
+          collections: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!post) {
+        res.status(404).json({ error: "Post not found" });
+        return;
+      }
+
+      // Get all comments for this post in a flat structure
+      const allComments = await prisma.comment.findMany({
+        where: {
+          postId: post.id,
+        },
+        include: {
+          author: {
+            select: {
+              id: true,
+              username: true,
+              profilePicture: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      });
+
+      // Check privacy access
+      const user = (req as any).user;
+      if (post.isPrivate) {
+        const hasAccess = 
+          user?.id === post.authorId || 
+          post.coowners.some(coowner => coowner.userId === user?.id);
+        
+        if (!hasAccess) {
+          res.status(403).json({ error: "Access denied to private post" });
+          return
+        }
+      }
+
+      const response = {
+        ...post,
+        comments: allComments,
+        stats: {
+          commentCount: allComments.length,
+          coownerCount: post.coowners.length,
+          collectionCount: post.collections.length,
+        },
+        hasMedia: {
+          hasImage: !!post.imageUrl,
+          hasVideo: !!post.videoUrl,
+        },
+      };
+
+      res.status(200).json(response);
+    } catch (error) {
+      console.error("Failed to fetch post:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
 export default postRouter;
