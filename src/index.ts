@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import router from "./routes/userRoutes";
+import ostrouter from "./routes/postGet";
 import authRoutes from "./routes/authRoutes";
 import userMessages from "./routes/userMessages";
 import postRoutes from "./routes/postRoutes";
@@ -75,6 +76,8 @@ app.use('/api/admin', adminRoutes);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/follow", followRouter);
+
+app.use("/api/ost",ostrouter)
 
 app.use("/api/messages", userMessages);
 app.use("/api/posts", postRoutes);
