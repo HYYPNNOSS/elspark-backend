@@ -23,6 +23,10 @@ import ffprobe from "ffprobe";
 import ffprobeStatic from "ffprobe-static";
 import multer from "multer";
 
+import Stripe from 'stripe';
+
+
+
 // import MP4Box from 'mp4box';
 
 import { setupGameWebSocket } from "./sockets/game.socket";
@@ -30,6 +34,11 @@ import { setupGameWebSocket } from "./sockets/game.socket";
 import friendRoute from "./routes/friendRoutes";
 import path from "path";
 import adminRoutes from "./routes/adminRoutes";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-08-27.basil',
+});
+
 
 dotenv.config();
 const app = express();
@@ -39,6 +48,8 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "https://elspark-frontend.vercel.app",
   "http://localhost:3000",
+  "http://192.168.1.5:3000",
+
 ];
 
 app.use(
@@ -94,6 +105,141 @@ app.get('/ping', (req, res) => {
   res.json({ status: 'alive', time: new Date() });
 });
 app.use("/videos", express.static(path.join(__dirname, "livevid")));
+
+
+app.post('/api/coins/create-payment-intent', async (req, res) => {
+  try {
+    const { amount, coinAmount, userId } = req.body;
+    
+    // Validate user
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+    
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return
+    }
+
+    // Create payment intent with GBP currency
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount * 100, // Stripe uses pence for GBP
+      currency: 'gbp',
+      metadata: {
+        userId: userId.toString(),
+        coinAmount: coinAmount.toString(),
+      },
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+    });
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
+    res.status(500).json({ error: 'Failed to create payment intent' });
+  }
+});
+
+// Add webhook handler for payment confirmation
+app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'] as string;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+  let event: Stripe.Event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err: any) {
+    console.error('Webhook signature verification failed:', err.message);
+    res.status(400).send(`Webhook Error: ${err.message}`);
+    return
+  }
+
+  // Handle the event
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      
+      try {
+        const userId = parseInt(paymentIntent.metadata.userId);
+        const coinAmount = parseInt(paymentIntent.metadata.coinAmount);
+
+        // Update user's coin balance
+        const updatedUser = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            cyberCoins: {
+              increment: coinAmount
+            }
+          }
+        });
+
+        // Log the transaction
+        await prisma.coinTransaction.create({
+          data: {
+            userId: userId,
+            amount: coinAmount,
+            priceGBP: paymentIntent.amount / 100, // Convert from pence to pounds
+            stripePaymentIntentId: paymentIntent.id,
+            status: 'completed'
+          }
+        });
+
+        console.log(`Payment succeeded for user ${userId}: +${coinAmount} coins`);
+      } catch (error) {
+        console.error('Error processing successful payment:', error);
+      }
+      break;
+
+    case 'payment_intent.payment_failed':
+      const failedPayment = event.data.object as Stripe.PaymentIntent;
+      console.log('Payment failed:', failedPayment.id);
+      
+      // Optionally log failed transaction
+      try {
+        const userId = parseInt(failedPayment.metadata.userId);
+        await prisma.coinTransaction.create({
+          data: {
+            userId: userId,
+            amount: parseInt(failedPayment.metadata.coinAmount),
+            priceGBP: failedPayment.amount / 100,
+            stripePaymentIntentId: failedPayment.id,
+            status: 'failed'
+          }
+        });
+      } catch (error) {
+        console.error('Error logging failed payment:', error);
+      }
+      break;
+
+    default:
+      console.log(`Unhandled event type ${event.type}`);
+  }
+
+  res.json({ received: true });
+});
+
+// Optional: Add route to get user's transaction history
+app.get('/api/coins/transactions/:userId', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId);
+    
+    const transactions = await prisma.coinTransaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 20 // Limit to last 20 transactions
+    });
+
+    res.json(transactions);
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
 
 // Define types
 interface VideoInfo {
