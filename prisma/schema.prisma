@@ -7,6 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+
 model GameStats {
   id        String   @id @default(uuid())
   userId    Int
@@ -88,6 +90,28 @@ model CoinTransaction {
   @@map("coin_transactions")
 }
 
+
+model ChatConnection {
+  id        String   @id @default(uuid())
+  user1Id   Int
+  user2Id   Int
+  roomId    String   @unique
+  status    ChatStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  endedAt   DateTime?
+
+  user1 User @relation("ChatUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("ChatUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([user1Id, user2Id])
+  @@map("chat_connections")
+}
+
+enum ChatStatus {
+  ACTIVE
+  ENDED
+}
+
 model User {
   id             Int      @id @default(autoincrement())
   username       String   @unique
@@ -118,6 +142,9 @@ model User {
 
   following Follow[] @relation("UserFollowing")
   followers Follow[] @relation("UserFollowers")
+
+  chatAsUser1 ChatConnection[] @relation("ChatUser1")
+  chatAsUser2 ChatConnection[] @relation("ChatUser2")
 
   cyberCoins    Int            @default(10)
   gameStats     GameStats[]

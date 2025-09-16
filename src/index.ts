@@ -34,6 +34,7 @@ import { setupGameWebSocket } from "./sockets/game.socket";
 import friendRoute from "./routes/friendRoutes";
 import path from "path";
 import adminRoutes from "./routes/adminRoutes";
+import notificationsRouter from "./routes/notificationsRoutes";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-08-27.basil',
@@ -90,12 +91,15 @@ app.use("/api/follow", followRouter);
 
 app.use("/api/ost",ostrouter)
 
+
+
 app.use("/api/messages", userMessages);
 app.use("/api/posts", postRoutes);
 app.use("/api/comments", commentsRouter);
 app.use("/api/coins", coinsRoute);
 app.use("/api/friend/", friendRoute);
 app.use("/api/postCoowners/", cooRoute);
+app.use("/api/notifications/", notificationsRouter);
 app.use("/api", postCollections);
 app.use("/uploads", express.static("uploads"));
 app.use("/api/ai-sessions", aiSessionsRoute);
@@ -105,6 +109,84 @@ app.get('/ping', (req, res) => {
   res.json({ status: 'alive', time: new Date() });
 });
 app.use("/videos", express.static(path.join(__dirname, "livevid")));
+
+// Add these endpoints to your existing Express app
+
+// Check if user has active chat connection
+app.get('/api/chat/connection/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const connection = await prisma.chatConnection.findFirst({
+      where: {
+        OR: [
+          { user1Id: parseInt(userId) },
+          { user2Id: parseInt(userId) }
+        ],
+        status: 'ACTIVE'
+      },
+      include: {
+        user1: { select: { id: true, username: true, profilePicture: true, online: true } },
+        user2: { select: { id: true, username: true, profilePicture: true, online: true } }
+      }
+    });
+
+    if (connection) {
+      const partnerId = connection.user1Id === parseInt(userId) ? connection.user2Id : connection.user1Id;
+      const partnerInfo = connection.user1Id === parseInt(userId) ? connection.user2 : connection.user1;
+      
+      res.json({
+        hasConnection: true,
+        roomId: connection.roomId,
+        partnerId,
+        partnerInfo,
+        bothOnline: connection.user1.online && connection.user2.online
+      });
+    } else {
+      res.json({ hasConnection: false });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check connection' });
+  }
+});
+
+// End chat connection (when skip is clicked)
+app.post('/api/chat/end/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const connection = await prisma.chatConnection.updateMany({
+      where: {
+        OR: [
+          { user1Id: parseInt(userId) },
+          { user2Id: parseInt(userId) }
+        ],
+        status: 'ACTIVE'
+      },
+      data: {
+        status: 'ENDED',
+        endedAt: new Date()
+      }
+    });
+
+    res.json({ success: true, ended: connection.count > 0 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to end connection' });
+  }
+});
+
+// Get chat messages for a room (optional - for message persistence)
+app.get('/api/chat/messages/:roomId', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    // You can store messages in a separate table if needed
+    // For now, return empty array since you're using socket memory
+    res.json({ messages: [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get messages' });
+  }
+});
 
 
 app.post('/api/coins/create-payment-intent', async (req, res) => {
@@ -437,43 +519,6 @@ interface Player {
 
 const corneredQueue: Player[] = [];
 
-// function checkForCorneredMatch() {
-//   const ROOM_SIZE = 4;
-
-//   while (corneredQueue.length >= ROOM_SIZE) {
-//     const players = corneredQueue.splice(0, ROOM_SIZE);
-//     const roomId = `cornered-room-${Date.now()}`;
-//     players.forEach((p) =>
-//       io.to(p.socketId).emit('cornered_match_found', { roomId, players })
-//     );
-//   }
-
-//   if (corneredQueue.length > 0 && corneredQueue.length < ROOM_SIZE) {
-//     setTimeout(() => {
-//       if (corneredQueue.length > 0 && corneredQueue.length < ROOM_SIZE) {
-//         const players = [...corneredQueue];
-//         corneredQueue.length = 0;
-
-//         while (players.length < ROOM_SIZE) {
-//           players.push({
-//             socketId: `bot-${Date.now()}-${Math.random()}`,
-//             color: getRandomColor(),
-//           });
-//         }
-
-//         const roomId = `cornered-room-${Date.now()}`;
-//         players.forEach((p) => {
-//           if (!p.socketId.startsWith('bot-')) {
-//             io.to(p.socketId).emit('cornered_match_found', {
-//               roomId,
-//               players,
-//             });
-//           }
-//         });
-//       }
-//     }, 5000);
-//   }
-// }
 
 function getRandomColor(): string {
   const colors = ["red", "green", "blue", "yellow"];
@@ -481,6 +526,9 @@ function getRandomColor(): string {
 }
 
 // userId -> socketId
+
+const persistentConnections = new Map(); // userId -> { partnerId, roomId, createdAt, status: 'active'|'ended' }
+const roomPresence = new Map();
 
 // ========== Random Chat Logic ==========
 const lookingQueue: number[] = [];
@@ -510,24 +558,47 @@ io.on("connection", (socket) => {
 
   // Handle user connection
   socket.on("user_connected", async (userId: number) => {
-    console.log("MFucking User connected with ID:", userId);
-
+    console.log("User connected with ID:", userId);
+  
     if (!userId || typeof userId !== "number") {
-      console.error("Mfucking Invalid userId received:", userId);
+      console.error("Invalid userId received:", userId);
       return;
     }
-
+  
     onlineUsers.set(userId, socket.id);
-
+  
     await prisma.user.update({
       where: { id: userId },
       data: { online: true },
     });
-
+  
+    // NEW: Check for existing persistent connection
+    const existingConnection = persistentConnections.get(userId);
+    if (existingConnection && existingConnection.status === 'active') {
+      const { partnerId, roomId } = existingConnection;
+      
+      // Rejoin the existing room
+      socket.join(roomId);
+      activeRooms.set(userId, roomId);
+      
+      // Add to room presence
+      if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
+      roomPresence.get(roomId).add(userId);
+      
+      // Notify client about existing connection
+      socket.emit("reconnected_to_existing", { partnerId, roomId });
+      
+      // Notify partner that this user is back online (if partner is online)
+      const partnerSocketId = onlineUsers.get(partnerId);
+      if (partnerSocketId) {
+        io.to(partnerSocketId).emit("partner_back_online", { partnerId: userId });
+      }
+    }
+  
     const users = await prisma.user.findMany({
       select: { id: true, username: true, profilePicture: true, online: true },
     });
-
+  
     io.emit("online_users", users);
     socket.emit("all_users", users);
   });
@@ -558,38 +629,61 @@ io.on("connection", (socket) => {
   });
 
   // ========== Random Match ==========
-  socket.on("start_looking", async (userId: number) => {
-    if (!userId || typeof userId !== "number") {
-      console.error("Invalid userId received:", userId);
-      return;
-    }
+  // REPLACE your existing start_looking handler with this
+socket.on("start_looking", async (userId: number) => {
+  if (!userId || typeof userId !== "number") {
+    console.error("Invalid userId received:", userId);
+    return;
+  }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { looking: true },
+  // NEW: Don't start looking if user already has active connection
+  const existingConnection = persistentConnections.get(userId);
+  if (existingConnection && existingConnection.status === 'active') {
+    console.log("User already has active connection, not adding to queue");
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { looking: true },
+  });
+
+  if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
+
+  if (lookingQueue.length >= 2) {
+    const [user1, user2] = lookingQueue.splice(0, 2);
+    const roomId = `room-${user1}-${user2}-${Date.now()}`;
+
+    // Store in both old and new systems
+    activeRooms.set(user1, roomId);
+    activeRooms.set(user2, roomId);
+
+    // NEW: Create persistent connections
+    persistentConnections.set(user1, { 
+      partnerId: user2, 
+      roomId, 
+      createdAt: Date.now(), 
+      status: 'active' 
+    });
+    persistentConnections.set(user2, { 
+      partnerId: user1, 
+      roomId, 
+      createdAt: Date.now(), 
+      status: 'active' 
     });
 
-    if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
+    const socket1 = onlineUsers.get(user1);
+    const socket2 = onlineUsers.get(user2);
 
-    if (lookingQueue.length >= 2) {
-      const [user1, user2] = lookingQueue.splice(0, 2); // get 2 users
-      const roomId = `room-${user1}-${user2}-${Date.now()}`;
-
-      activeRooms.set(user1, roomId);
-      activeRooms.set(user2, roomId);
-
-      const socket1 = onlineUsers.get(user1);
-      const socket2 = onlineUsers.get(user2);
-
-      if (socket1) {
-        io.to(socket1).emit("matched", { partnerId: user2, roomId });
-      }
-
-      if (socket2) {
-        io.to(socket2).emit("matched", { partnerId: user1, roomId });
-      }
+    if (socket1) {
+      io.to(socket1).emit("matched", { partnerId: user2, roomId });
     }
-  });
+
+    if (socket2) {
+      io.to(socket2).emit("matched", { partnerId: user1, roomId });
+    }
+  }
+});
 
   socket.on("skip", async (userId: number) => {
     const roomId = activeRooms.get(userId);
@@ -607,66 +701,173 @@ io.on("connection", (socket) => {
   });
 
   // Join room
-  socket.on("join_room", (roomId: string) => {
-    socket.join(roomId);
-  });
+  // REPLACE your existing join_room handler with this
+socket.on("join_room", (roomId: string) => {
+  socket.join(roomId);
+  
+  // NEW: Track room presence
+  if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
+  
+  // Find which user this socket belongs to
+  let currentUserId = null;
+  for (const [userId, socketId] of onlineUsers.entries()) {
+    if (socketId === socket.id) {
+      currentUserId = userId;
+      break;
+    }
+  }
+  
+  if (currentUserId) {
+    roomPresence.get(roomId).add(currentUserId);
+    
+    // Notify others in room about presence change
+    const usersInRoom = Array.from(roomPresence.get(roomId));
+    socket.to(roomId).emit("room_presence_updated", { 
+      usersInRoom, 
+      bothPresent: usersInRoom.length >= 2 
+    });
+    
+    socket.emit("room_presence_updated", { 
+      usersInRoom, 
+      bothPresent: usersInRoom.length >= 2 
+    });
+  }
+});
 
   // Send message in room
-  socket.on("send_message", ({ roomId, message }) => {
-    socket.to(roomId).emit("receive_message", message); // only sends to *other* clients in the room
-  });
+  // REPLACE your existing send_message handler with this
+socket.on("send_message", ({ roomId, message }) => {
+  // NEW: Check if both users are present in the room
+  const usersInRoom = roomPresence.get(roomId);
+  const bothPresent = usersInRoom && usersInRoom.size >= 2;
+  
+  if (bothPresent) {
+    // Allow message to be sent
+    socket.to(roomId).emit("receive_message", message);
+    socket.emit("message_sent", { success: true });
+  } else {
+    // Block message
+    socket.emit("message_sent", { 
+      success: false, 
+      reason: "Partner is not currently in the chat room" 
+    });
+  }
+});
 
   // Skip current chat
-  socket.on("skip", async (userId: number) => {
-    const roomId = activeRooms.get(userId);
+  // REMOVE both existing skip handlers and REPLACE with this single one
+socket.on("skip", async (userId: number) => {
+  const roomId = activeRooms.get(userId);
+  const connection = persistentConnections.get(userId);
 
-    if (roomId) {
-      io.to(roomId).emit("chat_ended");
-      for (const [uid, rid] of activeRooms.entries()) {
-        if (rid === roomId) activeRooms.delete(uid);
-      }
+  if (connection && connection.status === 'active') {
+    const { partnerId } = connection;
+    
+    // NEW: End persistent connections for both users
+    persistentConnections.set(userId, { ...connection, status: 'ended' });
+    const partnerConnection = persistentConnections.get(partnerId);
+    if (partnerConnection) {
+      persistentConnections.set(partnerId, { ...partnerConnection, status: 'ended' });
     }
+    
+    // Clean up room presence
+    if (roomId) {
+      roomPresence.delete(roomId);
+    }
+  }
 
-    if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
-    io.emit("looking_updated", lookingQueue);
-  });
+  if (roomId) {
+    io.to(roomId).emit("chat_ended");
+
+    // Clean up activeRooms
+    for (const [uid, rid] of activeRooms.entries()) {
+      if (rid === roomId) activeRooms.delete(uid);
+    }
+  }
+
+  // Add back to looking queue
+  if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
+  io.emit("looking_updated", lookingQueue);
+});
+
+// ADD this new handler (place it with your other socket handlers)
+socket.on("check_existing_connection", (userId: number) => {
+  const connection = persistentConnections.get(userId);
+  
+  if (connection && connection.status === 'active') {
+    const { partnerId, roomId } = connection;
+    
+    // Rejoin room
+    socket.join(roomId);
+    activeRooms.set(userId, roomId);
+    
+    // Update room presence
+    if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
+    roomPresence.get(roomId).add(userId);
+    
+    // Check if partner is online
+    const partnerOnline = onlineUsers.has(partnerId);
+    const usersInRoom = Array.from(roomPresence.get(roomId));
+    
+    socket.emit("existing_connection_found", {
+      partnerId,
+      roomId,
+      partnerOnline,
+      bothInRoom: usersInRoom.length >= 2
+    });
+  } else {
+    socket.emit("no_existing_connection");
+  }
+});
 
   // ========== Handle Disconnect ==========
-  socket.on("disconnect", async () => {
-    let disconnectedUserId: number | null = null;
+  // REPLACE your existing disconnect handler with this
+socket.on("disconnect", async () => {
+  let disconnectedUserId: number | null = null;
 
-    for (const [userId, socketId] of onlineUsers.entries()) {
-      if (socketId === socket.id) {
-        onlineUsers.delete(userId);
-        disconnectedUserId = userId;
-        break;
-      }
+  for (const [userId, socketId] of onlineUsers.entries()) {
+    if (socketId === socket.id) {
+      onlineUsers.delete(userId);
+      disconnectedUserId = userId;
+      break;
     }
+  }
 
-    if (disconnectedUserId !== null) {
-      await prisma.user.update({
-        where: { id: disconnectedUserId },
-        data: { online: false, looking: false },
-      });
-
-      const roomId = activeRooms.get(disconnectedUserId);
-      if (roomId) {
-        io.to(roomId).emit("chat_ended");
-        for (const [uid, rid] of activeRooms.entries()) {
-          if (rid === roomId) activeRooms.delete(uid);
-        }
-      }
-
-      const index = lookingQueue.indexOf(disconnectedUserId);
-      if (index !== -1) lookingQueue.splice(index, 1);
-    }
-
-    const users = await prisma.user.findMany({
-      select: { id: true, username: true, profilePicture: true, online: true },
+  if (disconnectedUserId !== null) {
+    await prisma.user.update({
+      where: { id: disconnectedUserId },
+      data: { online: false, looking: false },
     });
 
-    io.emit("online_users", users);
+    // NEW: Don't end chat on disconnect - keep persistent connection alive
+    const connection = persistentConnections.get(disconnectedUserId);
+    const roomId = activeRooms.get(disconnectedUserId);
+    
+    if (roomId && connection?.status === 'active') {
+      // Remove from room presence but keep connection alive
+      const usersInRoom = roomPresence.get(roomId);
+      if (usersInRoom) {
+        usersInRoom.delete(disconnectedUserId);
+        
+        // Notify partner that user left room (but connection still exists)
+        socket.to(roomId).emit("partner_left_room", { partnerId: disconnectedUserId });
+      }
+      
+      // Don't emit "chat_ended" - connection persists!
+      // Don't clean up activeRooms - user can rejoin
+    }
+
+    // Remove from looking queue
+    const index = lookingQueue.indexOf(disconnectedUserId);
+    if (index !== -1) lookingQueue.splice(index, 1);
+  }
+
+  const users = await prisma.user.findMany({
+    select: { id: true, username: true, profilePicture: true, online: true },
   });
+
+  io.emit("online_users", users);
+});
 });
 
 app.get("/api/tv/status", (req, res) => {

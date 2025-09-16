@@ -7,6 +7,7 @@ interface AuthRequest extends Request {
 }
 
 export const sendRequest = async (req: AuthRequest, res: Response) => {
+  // console.log("mousa")
   const { friendId } = req.body;
   const userId = req.user?.id;
 
