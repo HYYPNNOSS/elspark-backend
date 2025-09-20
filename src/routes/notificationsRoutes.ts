@@ -41,7 +41,7 @@ notificationsRouter.get("/all", verifyToken, async (req: any, res) => {
 
 // POST /api/notifications - Create a new notification
 notificationsRouter.post("/", verifyToken, async (req: any, res) => {
-  const { type, message, userId, postId, commentId } = req.body;
+  const { type, message, userId, postId, commentId, route } = req.body;
 
   // Validate required fields
   if (!type || !message || !userId) {
@@ -71,6 +71,7 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
         userId,
         postId: postId || null,
         commentId: commentId || null,
+        route: route || null
       },
     });
 
@@ -218,7 +219,8 @@ export const createNotification = async (
   message: string,
   userId: number,
   postId?: string,
-  commentId?: string
+  commentId?: string,
+  route?: string
 ) => {
   try {
     return await prisma.notification.create({
@@ -228,6 +230,7 @@ export const createNotification = async (
         userId,
         postId: postId || null,
         commentId: commentId || null,
+        route: route || null,
       },
     });
   } catch (error) {

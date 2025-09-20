@@ -1,15 +1,17 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import {createNotification} from '../routes/notificationsRoutes'
 const prisma = new PrismaClient();
 
 interface AuthRequest extends Request {
-  user?: { id: number };
+  user?: { id: number; username: string };
 }
 
 export const sendRequest = async (req: AuthRequest, res: Response) => {
   // console.log("mousa")
   const { friendId } = req.body;
   const userId = req.user?.id;
+  
 
   if (!userId || userId === friendId) {
     res.status(400).json({ error: "Invalid request" });
@@ -31,6 +33,15 @@ export const sendRequest = async (req: AuthRequest, res: Response) => {
       return;
     }
 
+    await createNotification(
+      'friend_request',
+      `${req.user?.username} sent you a friend request`,
+      friendId,
+      undefined,
+      undefined,
+      '/personal' 
+    );
+
     const request = await prisma.friendRequest.create({
       data: {
         senderId: userId,
@@ -38,6 +49,8 @@ export const sendRequest = async (req: AuthRequest, res: Response) => {
         status: "pending",
       },
     });
+
+    
 
     res.status(201).json(request);
   } catch (err) {

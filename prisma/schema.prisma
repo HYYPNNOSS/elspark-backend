@@ -117,7 +117,7 @@ model User {
   username       String   @unique
   email          String   @unique
   password       String
-  profilePicture String?
+  profilePicture String   @default("/uploads/profiles/profile-default.jpg")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   bio      String?
@@ -178,6 +178,7 @@ model Notification {
   user        User     @relation(fields: [userId], references: [id])
   userId      Int      
   postId      String?
+  route       String?
   commentId   String?
   read        Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -226,6 +227,7 @@ model PasswordResetToken {
 model Post {
   id        Int      @id @default(autoincrement())
   text      String?
+  title    String? 
   imageUrl  String?
   videoUrl  String?
   isPrivate Boolean  @default(false)

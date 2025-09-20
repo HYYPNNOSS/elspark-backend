@@ -28,7 +28,7 @@ postRouter.post(
     { name: "video", maxCount: 1 },
   ]),
   async (req: express.Request, res: express.Response) => {
-    const { text, isPrivate } = req.body;
+    const { text, title, isPrivate } = req.body
     const user = (req as any).user;
 
     if (!user?.id) {
@@ -48,6 +48,7 @@ postRouter.post(
 
       const newPost = await prisma.post.create({
         data: {
+          title,
           text,
           imageUrl,
           videoUrl,

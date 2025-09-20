@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
+import { createNotification } from './notificationsRoutes'; 
 
 const followRouter = express.Router();
 const prisma = new PrismaClient();
@@ -47,6 +48,8 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         res.status(400).json({ error: "Already following this user" });
         return;
       }
+
+      
   
       // Create follow relationship
       await prisma.follow.create({
@@ -64,11 +67,22 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
           userId: userId,
         },
       });
-  
+
+      await createNotification(
+        'follow',
+        `${req.user.username} started following you`,
+        followerId, 
+        undefined, 
+        undefined,  
+        `/profile/$${req.user.username}` // Route to follower's profile
+      );
+
       res.status(200).json({
         message: `Successfully followed ${userToFollow.username}`,
         followedUser: userToFollow.username,
       });
+
+      
     } catch (error) {
       console.error("Failed to follow user:", error);
       res.status(500).json({ error: "Internal Server Error" });

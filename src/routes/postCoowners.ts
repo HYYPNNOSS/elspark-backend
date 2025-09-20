@@ -1,6 +1,7 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
+import { createNotification } from "./notificationsRoutes";
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -89,6 +90,15 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
       where: { id: userId },
       select: { cyberCoins: true },
     });
+
+    await createNotification(
+      'coowner',
+      `${req.user?.username} made you a co-owner of their post/collection`,
+      post.authorId,
+      undefined,
+      undefined,
+      `/profile/${req.user?.username}` 
+    );
 
     res.json({
       message: `You now co-own this post! 1 cyber coin sent to ${post.author.username}`,

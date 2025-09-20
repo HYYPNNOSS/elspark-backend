@@ -115,6 +115,7 @@ router.get("/id/:id", async (req: Request, res: Response) => {
         posts: {
           select: {
             id: true,
+            title: true,
             text: true,
             imageUrl: true,
             isPrivate: true,
@@ -360,6 +361,7 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
         posts: {
           select: {
             id: true,
+            title: true,
             text: true,
             imageUrl: true,
             videoUrl: true,

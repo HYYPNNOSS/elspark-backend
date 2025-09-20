@@ -179,7 +179,7 @@ router.get('/collections/:userId', async (req, res) => {
 
 router.post('/collections/:collectionId/copy', async (req, res) => {
   const collectionId = parseInt(req.params.collectionId);
-  const { userId, newTitle } = req.body;
+  const { userId } = req.body;
 
   if (!userId) {
     res.status(400).json({ error: 'userId is required' });
@@ -195,11 +195,12 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
             post: {
               include: {
                 author: true,
+                coowners: true, // Check existing co-owners
               },
             },
           },
         },
-        user: true, // for profileUser.id
+        user: true, // Collection owner
       },
     });
 
@@ -208,13 +209,23 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    if (originalCollection.userId === userId) {
-      res.status(400).json({ error: 'Cannot copy your own collection' });
+    // Filter out posts where user is already a co-owner or author
+    const postsToCoown = originalCollection.posts.filter(postWrapper => {
+      const post = postWrapper.post;
+      const isAuthor = post.authorId === userId;
+      const isAlreadyCoowner = post.coowners.some(coowner => coowner.userId === userId);
+      return !isAuthor && !isAlreadyCoowner;
+    });
+
+    // Only block if user already owns/co-owns ALL posts in the collection
+    if (postsToCoown.length === 0) {
+      res.status(400).json({ error: 'You are already author or co-owner of all posts in this collection' });
       return;
     }
 
+    // Calculate unique recipients for coin distribution
     const uniqueAuthors = new Map<number, string>();
-    for (const postWrapper of originalCollection.posts) {
+    for (const postWrapper of postsToCoown) {
       const author = postWrapper.post.author;
       if (author.id !== userId) {
         uniqueAuthors.set(author.id, author.username);
@@ -222,12 +233,12 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
     }
 
     const recipientIds = new Set<number>([
-      originalCollection.user.id, // profileUser
-      ...uniqueAuthors.keys(),
+      originalCollection.user.id, // Collection owner
+      ...uniqueAuthors.keys(), // Post authors
     ]);
 
     if (recipientIds.has(userId)) {
-      recipientIds.delete(userId); // do not pay yourself
+      recipientIds.delete(userId); // Don't pay yourself
     }
 
     const requiredCoins = recipientIds.size;
@@ -242,26 +253,14 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
     }
 
     if (sender.cyberCoins < requiredCoins) {
-      res.status(400).json({ error: `You need at least ${requiredCoins} CyberCoins to copy this collection.` });
+      res.status(400).json({ error: `You need at least ${requiredCoins} CyberCoins to co-own these posts.` });
       return;
     }
 
-    // Check for duplicate collection title
-    const existing = await prisma.postCollection.findFirst({
-      where: { userId, title: newTitle },
-    });
-
-    if (existing) {
-      res.status(400).json({ error: 'You already have a collection with this title' });
-      return;
-    }
-
-    const postIds = originalCollection.posts.map(p => p.post.id);
-
-    // Start transaction for both coin transfers + collection creation
+    // Start transaction for coin transfers + co-ownership creation
     const transactionOps = [];
 
-    // Decrement from sender
+    // Decrement coins from sender
     transactionOps.push(
       prisma.user.update({
         where: { id: userId },
@@ -274,50 +273,52 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       transactionOps.push(
         prisma.user.update({
           where: { id: recipientId },
-          data: { cyberCoins: { increment: 1 } },
+          data: { cyberCoins: { increment: 0.5 } },
         })
       );
     }
 
-    // Create collection
-    transactionOps.push(
-      prisma.postCollection.create({
-        data: {
-          title: newTitle || `Copy of ${originalCollection.title}`,
-          user: { connect: { id: userId } },
-          posts: {
-            create: postIds.map(postId => ({
-              post: { connect: { id: postId } },
-            })),
+    // Create co-ownership records for each post
+    for (const postWrapper of postsToCoown) {
+      transactionOps.push(
+        prisma.postCoowner.create({
+          data: {
+            postId: postWrapper.post.id,
+            userId: userId,
           },
+        })
+      );
+    }
+
+    await prisma.$transaction(transactionOps);
+
+    // Fetch the updated posts with co-owners to return
+    const updatedPosts = await prisma.post.findMany({
+      where: {
+        id: { in: postsToCoown.map(p => p.post.id) },
+      },
+      include: {
+        author: {
+          select: { id: true, username: true },
         },
-        include: {
-          posts: {
-            include: {
-              post: {
-                include: {
-                  author: true,
-                },
-              },
+        coowners: {
+          include: {
+            user: {
+              select: { id: true, username: true },
             },
           },
-          user: {
-            select: { id: true, username: true },
-          },
         },
-      })
-    );
-
-    const results = await prisma.$transaction(transactionOps);
-    const newCollection = results[results.length - 1];
+      },
+    });
 
     res.json({
-      message: `Collection copied and ${requiredCoins} CyberCoins distributed.`,
-      collection: newCollection,
+      message: `You are now co-owner of ${postsToCoown.length} posts. ${requiredCoins} CyberCoins distributed.`,
+      coownedPosts: updatedPosts,
+      coinsSpent: requiredCoins,
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to copy collection' });
+    res.status(500).json({ error: 'Failed to create co-owned posts' });
   }
 });
 
