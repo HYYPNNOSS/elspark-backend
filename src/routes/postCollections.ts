@@ -310,7 +310,7 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
         },
       },
     });
-
+    // bomboclat
     res.json({
       message: `You are now co-owner of ${postsToCoown.length} posts. ${requiredCoins} CyberCoins distributed.`,
       coownedPosts: updatedPosts,
