@@ -78,8 +78,8 @@ model Follow {
 model CoinTransaction {
   id                    Int      @id @default(autoincrement())
   userId                Int
-  amount                Int      // Number of coins purchased
-  priceGBP              Float    // Price paid in GBP
+  amount                Int      
+  priceGBP              Float    
   stripePaymentIntentId String   @unique
   status                String   // 'pending', 'completed', 'failed'
   createdAt             DateTime @default(now())
@@ -319,7 +319,7 @@ model Message {
 model AIMsg {
   id        Int      @id @default(autoincrement())
   userId    Int
-  sender    String //here nariman either 'user' or 'bot'
+  sender    String //hello nariman here either 'user' or 'bot'
   message   String   @db.Text
   sessionId String? 
   createdAt DateTime @default(now())
@@ -333,7 +333,7 @@ model AISession {
   id        String   @id @default(uuid())
   userId    Int
   botId     Int
-  duration  Int // in minutes
+  duration  Int // and in minutes
   startTime DateTime @default(now())
   endTime   DateTime
   isActive  Boolean  @default(true)

@@ -52,8 +52,27 @@ router.post('/collections', async (req, res) => {
         },
       },
       include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            profilePicture: true,
+          },
+        },
         posts: {
-          include: { post: true },
+          include: { 
+            post: {
+              include: {
+                author: {
+                  select: {
+                    id: true,
+                    username: true,
+                    profilePicture: true,
+                  },
+                },
+              },
+            },
+          },
         },
       },
     })
