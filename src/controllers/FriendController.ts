@@ -58,6 +58,63 @@ export const sendRequest = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getRequestStatus = async (req: AuthRequest, res: Response) => {
+  const { userId } = req.params; 
+  const currentUserId = req.user?.id; 
+
+  if (!currentUserId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const friendId = parseInt(userId);
+    
+    if (currentUserId === friendId) {
+      res.status(400).json({ error: "Cannot check status with yourself" });
+      return;
+    }
+
+    // Check if they're already friends
+    const existingFriendship = await prisma.friendship.findFirst({
+      where: {
+        userId: currentUserId,
+        friendId: friendId,
+      },
+    });
+
+    if (existingFriendship) {
+      res.json({ status: 'friends' });
+      return;
+    }
+
+    // Check for pending friend request (either direction)
+    const existingRequest = await prisma.friendRequest.findFirst({
+      where: {
+        OR: [
+          { senderId: currentUserId, receiverId: friendId },
+          { senderId: friendId, receiverId: currentUserId },
+        ],
+        status: "pending",
+      },
+    });
+
+    if (existingRequest) {
+      if (existingRequest.senderId === currentUserId) {
+        res.json({ status: 'sent' }); // Current user sent the request
+      } else {
+        res.json({ status: 'received' }); // Current user received the request
+      }
+      return;
+    }
+
+    res.json({ status: 'none' }); // No relationship
+  } catch (err) {
+    console.error("Error checking friend request status:", err);
+    res.status(500).json({ error: "Internal error" });
+  }
+};
+
 export const acceptRequest = async (req: AuthRequest, res: Response) => {
   const { requestId } = req.body;
 

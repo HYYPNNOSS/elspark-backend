@@ -5,6 +5,7 @@ import {
   declineRequest,
   getPendingRequests,
   getFriends,
+  getRequestStatus,
 } from "../controllers/FriendController";
 import { verifyToken } from "../middlewares/authMiddleware";
 
@@ -15,5 +16,6 @@ router.post("/accept", verifyToken, acceptRequest);
 router.post("/decline", verifyToken, declineRequest);
 router.get("/pending", verifyToken, getPendingRequests);
 router.get("/list", verifyToken, getFriends);
+router.get('/request-status/:userId', verifyToken, getRequestStatus);
 
 export default router;

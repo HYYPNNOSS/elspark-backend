@@ -170,6 +170,7 @@ router.get("/allcollections", async (req: Request, res: Response) => {
 });
 
 // Get user collections
+// Fixed backend route
 router.get('/collections/:userId', async (req, res) => {
   const userId = parseInt(req.params.userId)
 
@@ -177,11 +178,24 @@ router.get('/collections/:userId', async (req, res) => {
     const collections = await prisma.postCollection.findMany({
       where: { userId },
       include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            profilePicture: true,
+          },
+        },
         posts: {
           include: {
             post: {
               include: {
-                author: true,
+                author: {
+                  select: {
+                    id: true,
+                    username: true,
+                    profilePicture: true,
+                  },
+                },
               },
             },
           },
@@ -195,6 +209,67 @@ router.get('/collections/:userId', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch collections' })
   }
 })
+
+// Add this route to your collections router
+router.get('/collections/:collectionId/ownership-status/:userId', async (req, res) => {
+  const collectionId = parseInt(req.params.collectionId);
+  const userId = parseInt(req.params.userId);
+
+  try {
+    const collection = await prisma.postCollection.findUnique({
+      where: { id: collectionId },
+      include: {
+        posts: {
+          include: {
+            post: {
+              include: {
+                coowners: true,
+              },
+            },
+          },
+        },
+        user: true,
+      },
+    });
+
+    if (!collection) {
+      res.status(404).json({ error: 'Collection not found' });
+      return 
+    }
+
+    // Check if user is collection owner
+    const isCollectionOwner = collection.userId === userId;
+
+    // Check ownership/co-ownership status for each post
+    const postStatuses = collection.posts.map(postWrapper => {
+      const post = postWrapper.post;
+      const isAuthor = post.authorId === userId;
+      const isCoowner = post.coowners.some(coowner => coowner.userId === userId);
+      
+      return {
+        postId: post.id,
+        isAuthor,
+        isCoowner,
+        isOwnedOrCoowned: isAuthor || isCoowner
+      };
+    });
+
+    // Check if user owns/co-owns ALL posts
+    const ownsAllPosts = postStatuses.every(status => status.isOwnedOrCoowned);
+
+    res.json({
+      isCollectionOwner,
+      ownsAllPosts,
+      postStatuses,
+      totalPosts: collection.posts.length,
+      ownedPosts: postStatuses.filter(s => s.isOwnedOrCoowned).length
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to check ownership status' });
+  }
+});
 
 router.post('/collections/:collectionId/copy', async (req, res) => {
   const collectionId = parseInt(req.params.collectionId);
