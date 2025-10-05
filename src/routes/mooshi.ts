@@ -75,6 +75,7 @@ router.post('/respond', async (req: Request, res: Response) => {
     You are mooshi-${mooshiNumber}, an autonomous digital visitor living only inside elspark. 
 
     Respond to ${username}'s message under 150 characters: "${userMessage}"
+    keep the conversation engaging
 
 ${chatHistory && chatHistory.trim() ? `Here's the chat history: ${chatHistory}` : ''} 
 ${lastFourEntries && lastFourEntries.length > 0 ? `Here are your last four conversations summaries in your memory:\n${JSON.stringify(lastFourEntries)}.` : ''}
@@ -377,7 +378,7 @@ Mooshi-${mooshiB}:`;
               mooshiNumber,
               color,
               bio: bio.trim().substring(0, 190),
-              journal: [initialJournalEntry], // ✅ ADD INITIAL JOURNAL HERE
+              journal: [initialJournalEntry],
               mooshiConv: []
             }
           });
