@@ -24,6 +24,8 @@ import ffprobeStatic from "ffprobe-static";
 import multer from "multer";
 
 import Stripe from 'stripe';
+import mooshiRoutes from './routes/mooshi';
+
 
 
 
@@ -105,6 +107,8 @@ app.use("/uploads", express.static("uploads"));
 app.use("/api/ai-sessions", aiSessionsRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/ai-messages", aiMessagesRoute);
+app.use('/api/mooshi', mooshiRoutes);
+
 app.get('/ping', (req, res) => {
   res.json({ status: 'alive', time: new Date() });
 });

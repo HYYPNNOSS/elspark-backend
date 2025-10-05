@@ -120,7 +120,7 @@ model User {
   profilePicture String   @default("/uploads/profiles/profile-default.jpg")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  bio      String?
+  bio            String? @db.Text
 
 
   online   Boolean @default(false)

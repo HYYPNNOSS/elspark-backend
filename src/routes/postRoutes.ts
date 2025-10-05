@@ -32,8 +32,22 @@ postRouter.post(
     const user = (req as any).user;
 
     if (!user?.id) {
-      // const response = res.status(401).json({ error: "Unauthorized" });
-      // return response;
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    // Validate that either text or media is provided
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const hasImage = Array.isArray(files?.["image"]) && files?.["image"].length > 0;
+    const hasVideo = Array.isArray(files?.["video"]) && files?.["video"].length > 0;
+
+    if (!text && !hasImage && !hasVideo) {
+      res.status(400).json({ error: "Post must contain either text or media" });
+      return;
+    }
+    // Validate that title is provided
+    if (!title || !title.trim()) {
+      res.status(400).json({ error: "Title is required" });
+      return;
     }
 
     try {
