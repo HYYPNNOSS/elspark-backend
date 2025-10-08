@@ -8,62 +8,37 @@ import { PrismaClient } from "@prisma/client";
 const postRouter = express.Router();
 const prisma = new PrismaClient();
 
-const storage = multer.diskStorage({
-  destination: (_req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${file.fieldname}${ext}`);
-  },
-});
-
-const upload = multer({ storage });
+import { postMediaUpload, getWasabiUrl } from "../config/wasabi-config";
 
 postRouter.post(
   "/",
   verifyToken,
-  upload.fields([
+  postMediaUpload.fields([
     { name: "image", maxCount: 1 },
     { name: "video", maxCount: 1 },
   ]),
   async (req: express.Request, res: express.Response) => {
-    const { text, title, isPrivate } = req.body
+    const { text, title, isPrivate } = req.body;
     const user = (req as any).user;
 
     if (!user?.id) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    // Validate that either text or media is provided
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-    const hasImage = Array.isArray(files?.["image"]) && files?.["image"].length > 0;
-    const hasVideo = Array.isArray(files?.["video"]) && files?.["video"].length > 0;
-
-    if (!text && !hasImage && !hasVideo) {
-      res.status(400).json({ error: "Post must contain either text or media" });
-      return;
-    }
-    // Validate that title is provided
-    if (!title || !title.trim()) {
-      res.status(400).json({ error: "Title is required" });
-      return;
-    }
 
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-      const imageFile = files?.["image"]?.[0];
-      const videoFile = files?.["video"]?.[0];
+      const imageFile = files?.["image"]?.[0] as Express.MulterS3.File | undefined;
+      const videoFile = files?.["video"]?.[0] as Express.MulterS3.File | undefined;
 
-      const imageUrl = imageFile ? `/uploads/${imageFile.filename}` : null;
-      const videoUrl = videoFile ? `/uploads/${videoFile.filename}` : null;
-
-      // console.log(!user?.id)
+      // Extract the key from location and prepend /elspark
+      const imageUrl = imageFile ? imageFile.key : null;
+const videoUrl = videoFile ? videoFile.key : null;
 
       const newPost = await prisma.post.create({
         data: {
-          title,
           text,
+          title,
           imageUrl,
           videoUrl,
           isPrivate: isPrivate === "true",
@@ -87,7 +62,6 @@ postRouter.post(
     }
   }
 );
-
 
 postRouter.get(
   "/:id",

@@ -4,29 +4,10 @@ import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
 import multer from "multer";
 import path from "path";
+import { profilePictureUpload } from "../config/wasabi-config";
 
-// Configure multer for profile picture uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/profiles"); // Make sure this directory exists
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname));
-  },
-});
 
-const upload = multer({
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed"));
-    }
-  },
-});
+
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -305,7 +286,7 @@ router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
 router.put(
   "/:id/profile-picture",
   verifyToken,
-  upload.single("profilePicture"),
+  profilePictureUpload.single("profilePicture"),
   async (req: any, res: Response) => {
     const { id } = req.params;
     const userId = req.user.id;
@@ -324,11 +305,21 @@ router.put(
     }
 
     try {
-      const profilePicturePath = `/uploads/profiles/${req.file.filename}`;
+      const profilePicturePath = (req.file as Express.MulterS3.File).location;
+
+      const prefix = 'https://elspark.s3.eu-west-1.wasabisys.com';
+let path = profilePicturePath; 
+
+if (path.startsWith(prefix)) {
+    path = path.substring(prefix.length);
+}
+
+
+      console.log(path)
 
       const updatedUser = await prisma.user.update({
         where: { id: parseInt(id) },
-        data: { profilePicture: profilePicturePath },
+        data: { profilePicture: path },
         select: {
           id: true,
           username: true,
@@ -350,7 +341,6 @@ router.put(
     }
   }
 );
-
 router.get("/:username/posts", async (req: Request, res: Response) => {
   const { username } = req.params;
 
@@ -396,7 +386,7 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
 router.put(
   "/:id",
   verifyToken,
-  upload.single("profilePicture"),
+  profilePictureUpload.single("profilePicture"),
   async (req: any, res: Response) => {
     const { id } = req.params;
     const userId = req.user.id;
@@ -412,7 +402,8 @@ router.put(
     const updateData: any = {};
     if (bio !== undefined) updateData.bio = bio;
     if (profilePictureFile) {
-      updateData.profilePicture = `/uploads/profiles/${profilePictureFile.filename}`;
+      updateData.profilePicture = (profilePictureFile as Express.MulterS3.File).location;
+
     }
 
     try {
@@ -439,6 +430,7 @@ router.put(
     }
   }
 );
+
 
 
 
