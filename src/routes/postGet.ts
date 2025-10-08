@@ -21,6 +21,7 @@ ostrouter.get("/posts/public", async (req, res) => {
         take: limitNum,
         select: {
           id: true,
+          title: true,
           text: true,
           imageUrl: true,
           videoUrl: true,

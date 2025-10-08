@@ -109,6 +109,7 @@ router.get("/allcollections", async (req: Request, res: Response) => {
             post: {
               select: {
                 id: true,
+                title: true,
                 text: true,
                 imageUrl: true,
                 videoUrl: true,
