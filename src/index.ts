@@ -91,7 +91,7 @@ app.use('/api/admin', adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/follow", followRouter);
 
-app.use("/api/ost",ostrouter)
+app.use("/api/ost", ostrouter)
 
 
 
@@ -114,9 +114,7 @@ app.get('/ping', (req, res) => {
 });
 app.use("/videos", express.static(path.join(__dirname, "livevid")));
 
-// Add these endpoints to your existing Express app
 
-// Check if user has active chat connection
 app.get('/api/chat/connection/:userId', async (req, res) => {
   try {
     const { userId } = req.params;

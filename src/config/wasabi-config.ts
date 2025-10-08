@@ -29,7 +29,8 @@ export const profilePictureUpload = multer({
     },
     key: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      const filename = `profiles/profile-${uniqueSuffix}${path.extname(file.originalname)}`;
+      // Add 'elspark/' prefix
+      const filename = `elspark/profiles/profile-${uniqueSuffix}${path.extname(file.originalname)}`;
       cb(null, filename);
     },
   }),
@@ -44,6 +45,7 @@ export const profilePictureUpload = multer({
 });
 
 // Post media upload (images and videos)
+// config/wasabi-config.ts
 export const postMediaUpload = multer({
   storage: multerS3({
     s3: s3Client,
@@ -54,7 +56,8 @@ export const postMediaUpload = multer({
     },
     key: (req, file, cb) => {
       const ext = path.extname(file.originalname);
-      const filename = `posts/${Date.now()}-${file.fieldname}${ext}`;
+      // Add 'elspark/' prefix to match your CDN structure
+      const filename = `elspark/posts/${Date.now()}-${file.fieldname}${ext}`;
       cb(null, filename);
     },
   }),
