@@ -146,7 +146,7 @@ model User {
   chatAsUser1 ChatConnection[] @relation("ChatUser1")
   chatAsUser2 ChatConnection[] @relation("ChatUser2")
 
-  cyberCoins    Int            @default(10)
+  cyberCoins    Int            @default(5)
   gameStats     GameStats[]
   notifications Notification[] 
 

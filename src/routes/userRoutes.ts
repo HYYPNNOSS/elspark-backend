@@ -383,6 +383,33 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/profile-picture/:id", async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: Number(id) },
+      select: {
+        id: true,
+        profilePicture: true,
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.status(200).json({ 
+      id: user.id,
+      profilePicture: user.profilePicture 
+    });
+  } catch (err) {
+    console.error("Error fetching profile picture:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.put(
   "/:id",
   verifyToken,
