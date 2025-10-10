@@ -123,6 +123,7 @@ router.get("/coowned/:targetId", verifyToken, async (req: any, res) => {
           select: {
             id: true,
             text: true,
+            title: true,
             imageUrl: true,
             videoUrl: true,
             isPrivate: true,

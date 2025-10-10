@@ -341,6 +341,7 @@ if (path.startsWith(prefix)) {
     }
   }
 );
+
 router.get("/:username/posts", async (req: Request, res: Response) => {
   const { username } = req.params;
 
