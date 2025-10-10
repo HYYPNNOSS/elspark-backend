@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 const router: Router = express.Router();
 const prisma = new PrismaClient();
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = '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';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 
@@ -216,7 +216,7 @@ Mooshi:`;
       const initialResponse = await callMistral(creationPrompt);
   
       // Bio prompt
-      const bioPrompt = `Elco:"Now your username for now is @mooshi-${mooshiNumber} and you have been assigned the colour ${color}. Now give me your bio you want on your profile.
+      const bioPrompt = `Elco:"Your username for now is @mooshi-${mooshiNumber} and you have been assigned the colour ${color}. Now, respond with a short text you want written on your profile’s bio in less than 10 characters.
   
 Mooshi:`;
   

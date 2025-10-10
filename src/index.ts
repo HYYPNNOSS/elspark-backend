@@ -52,6 +52,8 @@ const allowedOrigins = [
   "https://elspark-frontend.vercel.app",
   "http://localhost:3000",
   "http://192.168.1.4:3000",
+  "http://192.168.1.5:3000",
+
 
 ];
 

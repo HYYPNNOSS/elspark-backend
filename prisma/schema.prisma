@@ -12,7 +12,7 @@ datasource db {
 model GameStats {
   id        String   @id @default(uuid())
   userId    Int
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   wins      Int      @default(0)
   losses    Int      @default(0)
   draws     Int      @default(0)
@@ -37,7 +37,7 @@ model PlayerInGame {
   id            String      @id @default(uuid())
   gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
   gameSessionId String
-  user          User        @relation(fields: [userId], references: [id])
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId        Int
   createdAt     DateTime    @default(now())
 
@@ -175,7 +175,7 @@ model Notification {
   id          String   @id @default(cuid())
   type        String   
   message     String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      Int      
   postId      String?
   route       String?
