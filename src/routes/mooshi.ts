@@ -8,6 +8,26 @@ const prisma = new PrismaClient();
 const OPENROUTER_API_KEY = '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';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+async function callMistralWithRetry(prompt: string, maxRetries = 3): Promise<string> {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await callMistral(prompt);
+    } catch (error) {
+      lastError = error;
+      console.warn(`Mistral call attempt ${attempt}/${maxRetries} failed:`, error);
+      
+      if (attempt < maxRetries) {
+        
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError;
+}
 
 async function callMistral(prompt: string): Promise<string> {
   try {
@@ -80,7 +100,7 @@ router.post('/respond', async (req: Request, res: Response) => {
     ${lastFourEntries && lastFourEntries.length > 0 ? `Here are your last four personal journal entries which summarises your recent memory:\n${JSON.stringify(lastFourEntries)}.` : ''}
 `;
 
-    const response = await callMistral(prompt);
+  const response = await callMistralWithRetry(prompt);
     
     // ✅ VALIDATE RESPONSE - Don't send empty responses
     const trimmedResponse = response?.trim();
@@ -88,15 +108,18 @@ router.post('/respond', async (req: Request, res: Response) => {
     if (!trimmedResponse || trimmedResponse.length === 0) {
       console.warn(`Empty response from Mistral for mooshi-${mooshiNumber}`);
       res.json({ 
-        response: "..." // Default fallback message
+        response: "..." 
       });
       return;
     }
 
     res.json({ response: trimmedResponse });
   } catch (error) {
-    console.error('Error in mooshi response:', error);
-    res.status(500).json({ error: 'Failed to generate response' });
+    console.error('Error in mooshi response after retries:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate response after multiple attempts',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
