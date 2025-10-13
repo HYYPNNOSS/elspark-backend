@@ -21,6 +21,7 @@ interface BotConfig {
 
 
 // POST /api/ai-sessions - Create new AI session
+// POST /api/ai-sessions - Create new AI session
 router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { botId, duration, cost }: { botId: number; duration: number; cost: number } = req.body;
@@ -30,9 +31,7 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
     console.log("userId");
 
     if (!req.user) {
-    console.log("Unauthorized: no user in request");
-
-
+      console.log("Unauthorized: no user in request");
       res.status(401).json({ error: 'Unauthorized: no user in request' });
       return
     }
@@ -42,11 +41,13 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
       where: { id: userId }
     });
 
-    if (!user || user.cyberCoins < cost) {
+    // Convert Decimal to number for comparison
+    const userCoins = user?.cyberCoins ? Number(user.cyberCoins) : 0;
+
+    if (!user || userCoins < cost) {
       res.status(400).json({ error: 'Insufficient coins' });
       return
     }
-
 
     // Create AI session
     const endTime = new Date(Date.now() + duration * 60 * 1000);
@@ -60,10 +61,10 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Deduct coins
+    // Deduct coins using decrement
     await prisma.user.update({
       where: { id: userId },
-      data: { cyberCoins: user.cyberCoins - cost }
+      data: { cyberCoins: { decrement: cost } }
     });
 
     res.json({ 

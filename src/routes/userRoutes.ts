@@ -211,7 +211,9 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
       return;
     }
 
-    if (sender.cyberCoins < roundedAmount) {
+    const senderCoins = Number(sender.cyberCoins);
+
+    if (senderCoins  < roundedAmount) {
       res.status(400).json({ error: "Insufficient cyber coins" });
       return;
     }

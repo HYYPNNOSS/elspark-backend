@@ -55,9 +55,10 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
       res.status(404).json({ error: "User not found" });
       return;
     }
+    const currentUserCoins = Number(currentUser.cyberCoins);
 
     // Check if user has enough cyber coins
-    if (currentUser.cyberCoins < coinAmount) {
+    if (currentUserCoins  < coinAmount) {
       res
         .status(400)
         .json({

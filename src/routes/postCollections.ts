@@ -349,7 +349,9 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    if (sender.cyberCoins < requiredCoins) {
+    const senderCoins = Number(sender.cyberCoins);
+
+    if (senderCoins < requiredCoins) {
       res.status(400).json({ error: `You need at least ${requiredCoins} CyberCoins to co-own these posts.` });
       return;
     }
