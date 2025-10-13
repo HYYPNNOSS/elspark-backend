@@ -92,7 +92,7 @@ router.post('/respond', async (req: Request, res: Response) => {
 
     // Construct prompt
     const prompt = `
-    reply to this message : "${userMessage}" 
+    ${chatHistory && chatHistory.trim() ? `continue chating reponding to this message : ` : 'reply to this message :'} "${userMessage}" 
     from ${username} under than 12 words 
     
     ${chatHistory && chatHistory.trim() ? `based on the previous chat: "${chatHistory}"` : ''} 
