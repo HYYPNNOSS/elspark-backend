@@ -338,7 +338,7 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       recipientIds.delete(userId); // Don't pay yourself
     }
 
-    const requiredCoins = recipientIds.size;
+    const requiredCoins = recipientIds.size * 0.5;
     const sender = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, username: true, cyberCoins: true },
