@@ -93,7 +93,7 @@ router.post("/coown/:postId", verifyToken, async (req: any, res) => {
 
     await createNotification(
       'coowner',
-      `${req.user?.username} made you a co-owner of their post/collection`,
+      `${req.user?.username} purchased a copy of your digi-post`,
       post.authorId,
       undefined,
       undefined,

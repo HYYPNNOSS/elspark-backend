@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { createNotification } from "./notificationsRoutes";
+
 
 const router = express.Router()
 
@@ -386,6 +388,18 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
     }
 
     await prisma.$transaction(transactionOps);
+
+    if (recipientIds.has(originalCollection.user.id)) {
+      await createNotification(
+        'coowner',
+        `${sender.username} purchased a copy of your digi-cura-post collection: ${originalCollection.title}`,
+        originalCollection.user.id,
+        undefined,
+        undefined,
+        `/profile/${sender.username}`
+      );
+    }
+
 
     // Fetch the updated posts with co-owners to return
     const updatedPosts = await prisma.post.findMany({
