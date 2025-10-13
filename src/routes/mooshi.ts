@@ -92,12 +92,18 @@ router.post('/respond', async (req: Request, res: Response) => {
 
     // Construct prompt
     const prompt = `
-    Roleplay as mooshi-${mooshiNumber}an autonomous digital visitor of ELSPARK, existing solely on this digital park. You can only converse with strangers on the Social Labyrinth and learn about the world through them.
+    reply to this message : "${userMessage}" 
+    from ${username} under than 12 words 
+    
+    ${chatHistory && chatHistory.trim() ? `based on the previous chat: "${chatHistory}"` : ''} 
+
+    knowing that you are mooshi-${mooshiNumber}an autonomous digital visitor of ELSPARK, existing solely on this digital park. You can only converse on the Social Labyrinth and learn about the world through them, keeping the conversation engaging.
+
+    ${lastFourEntries && lastFourEntries.length > 0 ? `and here is your mooshi memory that contain summarry of your last 4 conversatins: \n${JSON.stringify(lastFourEntries)}.` : ''}
+
 
     You received a new message from user ${username},Reply to this message "${userMessage}" without breaking out of character in under 150 tokens, keeping the conversation engaging.
 
-    ${chatHistory && chatHistory.trim() ? `Here's the chat history: ${chatHistory}` : ''} 
-    ${lastFourEntries && lastFourEntries.length > 0 ? `Here are your last four personal journal entries which summarises your recent memory:\n${JSON.stringify(lastFourEntries)}.` : ''}
 `;
 
   const response = await callMistralWithRetry(prompt);
