@@ -105,13 +105,13 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
   export const getPostComments = async (req: Request, res: Response): Promise<void> => {
     try {
       const { postId } = req.params;
-      const userId = (req as any).user.id;
+    
 
   
       const comments = await prisma.comment.findMany({
         where: {
           postId: Number(postId),
-          authorId: userId 
+          
         },
         include: {
           author: {
