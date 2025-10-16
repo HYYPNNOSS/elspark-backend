@@ -16,20 +16,28 @@ const verifyToken = (req: any, res: any, next: any) => {
   next();
 };
 
-// GET /api/notifications - Get all notifications for current user
-notificationsRouter.get("/all", verifyToken, async (req: any, res) => {
-  const userId = req.user?.id;
 
-//   if (!userId) {
-//     res.status(401).json({ error: "Unauthorized" });
-//     return;
-//   }
+notificationsRouter.get("/all", async (req: any, res) => {
+  const userId = parseInt(req.query.userId as string);
+
+  if (!userId || isNaN(userId)) {
+    res.status(400).json({ error: "Valid userId is required" });
+    return;
+  }
 
   try {
+    // ✅ Check if the user exists first
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return
+    }
+
+    // ✅ Get notifications only for that user
     const notifications = await prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      take: 50, // Limit to last 50 notifications
+      take: 50,
     });
 
     res.json(notifications);
@@ -38,6 +46,7 @@ notificationsRouter.get("/all", verifyToken, async (req: any, res) => {
     res.status(500).json({ error: "Failed to fetch notifications" });
   }
 });
+
 
 // POST /api/notifications - Create a new notification
 notificationsRouter.post("/", verifyToken, async (req: any, res) => {
