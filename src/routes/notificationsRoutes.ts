@@ -20,18 +20,21 @@ const verifyToken = (req: any, res: any, next: any) => {
 notificationsRouter.get("/all", verifyToken, async (req: any, res) => {
   const userId = req.user?.id;
 
-//   if (!userId) {
-//     res.status(401).json({ error: "Unauthorized" });
-//     return;
-//   }
+  // ✅ UNCOMMENTED - This is critical!
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
 
   try {
+    // ✅ This already correctly filters by userId
     const notifications = await prisma.notification.findMany({
-      where: { userId },
+      where: { userId }, // Only get notifications FOR this user
       orderBy: { createdAt: "desc" },
-      take: 50, // Limit to last 50 notifications
+      take: 50,
     });
 
+    console.log(`Fetching notifications for userId: ${userId}, found: ${notifications.length}`);
     res.json(notifications);
   } catch (error) {
     console.error("Error fetching notifications:", error);
@@ -68,13 +71,14 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
       data: {
         type,
         message,
-        userId,
+        userId, // This is the recipient of the notification
         postId: postId || null,
         commentId: commentId || null,
         route: route || null
       },
     });
 
+    console.log(`Created notification for userId: ${userId}, type: ${type}`);
     res.status(201).json(notification);
   } catch (error) {
     console.error("Error creating notification:", error);
@@ -217,17 +221,18 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
 export const createNotification = async (
   type: string,
   message: string,
-  userId: number,
+  userId: number, // ✅ This is the RECIPIENT of the notification
   postId?: string,
   commentId?: string,
   route?: string
 ) => {
   try {
+    console.log(`Creating notification: type=${type}, recipient=${userId}`);
     return await prisma.notification.create({
       data: {
         type,
         message,
-        userId,
+        userId, // The person who RECEIVES the notification
         postId: postId || null,
         commentId: commentId || null,
         route: route || null,
