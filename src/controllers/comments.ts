@@ -87,7 +87,7 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
           await createNotification(
             'reply',
             `${commenter?.username} replied to your comment`,
-            parentComment.authorId, // Notify the parent comment author
+            parentComment.authorId, 
             postId?.toString(),
             comment.id.toString(),
             `/profile/post/${postId}` // Route to the post
@@ -105,11 +105,13 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
   export const getPostComments = async (req: Request, res: Response): Promise<void> => {
     try {
       const { postId } = req.params;
+      const userId = (req as any).user.id;
+
   
       const comments = await prisma.comment.findMany({
         where: {
           postId: Number(postId),
-          parentId: null
+          authorId: userId 
         },
         include: {
           author: {

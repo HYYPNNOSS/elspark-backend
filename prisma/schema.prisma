@@ -226,7 +226,7 @@ model PasswordResetToken {
 
 model Post {
   id        Int      @id @default(autoincrement())
-  text      String?
+  text      String?  @db.Text
   title    String? 
   imageUrl  String?
   videoUrl  String?
