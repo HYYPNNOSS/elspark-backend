@@ -30,7 +30,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     },
   });
 
-  const resetLink = `http:${FRONTEND_URL}/reset-password/${token}`;
+  const resetLink = `https://elspark.online/reset-password/${token}`;
 
   // Use Nodemailer to send the email
   const transporter = nodemailer.createTransport({
@@ -57,6 +57,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     await transporter.sendMail(mailOptions);
     return res.json({ message: "Reset link sent to your email." });
   } catch (err) {
+    console.error("Forgot password error:", err); 
     console.error(err);
     return res.status(500).json({ error: "Failed to send email" });
   }
