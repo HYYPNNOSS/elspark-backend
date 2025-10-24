@@ -12,6 +12,69 @@ const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID!;
 const EMAILJS_USER_ID = process.env.EMAILJS_USER_ID!;
 const FRONTEND_URL = "localhost:3000";
 
+
+const ACCESS_TOKEN_EXPIRY = "15m"; 
+const REFRESH_TOKEN_EXPIRY = "7d"; 
+
+const generateAccessToken = (user: { id: number; email: string; username: string }) => {
+  return jwt.sign(
+    { id: user.id, email: user.email, username: user.username },
+    JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRY }
+  );
+};
+
+const generateRefreshToken = async (userId: number) => {
+  const token = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY });
+  
+  await prisma.refreshToken.create({
+    data: {
+      token,
+      userId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+    },
+  });
+  
+  return token;
+};
+
+export const refreshAccessToken = async (req: Request, res: Response) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({ error: "Refresh token required" });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_SECRET) as { id: number };
+
+    // Check if refresh token exists in DB and is not expired
+    const storedToken = await prisma.refreshToken.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    });
+
+    if (!storedToken || storedToken.expiresAt < new Date()) {
+      return res.status(401).json({ error: "Invalid or expired refresh token" });
+    }
+
+    // Generate new tokens
+    const newAccessToken = generateAccessToken(storedToken.user);
+    const newRefreshToken = await generateRefreshToken(storedToken.user.id);
+
+    // Delete old refresh token (rotation)
+    await prisma.refreshToken.delete({ where: { token: refreshToken } });
+
+    return res.status(200).json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (err) {
+    console.error("Refresh token error:", err);
+    return res.status(401).json({ error: "Invalid refresh token" });
+  }
+};
+
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
 
@@ -162,15 +225,20 @@ export const signup = async (req: Request, res: Response) => {
     console.log(`✅ User created in ${Date.now() - createStart}ms`);
 
     console.log("🎫 Creating token...");
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+    // NEW:
+const accessToken = generateAccessToken(user);
+const refreshToken = await generateRefreshToken(user.id);
+
+
 
     const totalTime = Date.now() - startTime;
     console.log(`🏁 Total signup time: ${totalTime}ms`);
-
     return res.status(201).json({
-      token,
+      accessToken,
+      refreshToken,
       user: { id: user.id, email: user.email, username: user.username },
     });
+   
   } catch (err: any) {
     console.error("❌ Signup error:", err);
     const totalTime = Date.now() - startTime;
@@ -213,20 +281,15 @@ export const signin = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-      },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    
+const accessToken = generateAccessToken(user);
+const refreshToken = await generateRefreshToken(user.id);
 
-    return res.status(200).json({
-      token,
-      user: { id: user.id, email: user.email, username: user.username },
-    });
+return res.status(200).json({
+  accessToken,
+  refreshToken,
+  user: { id: user.id, email: user.email, username: user.username },
+});
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Server error" });

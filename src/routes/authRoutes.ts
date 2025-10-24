@@ -5,6 +5,8 @@ import {
   forgotPassword,
   resetPassword,
 } from "../controllers/authController";
+import { refreshAccessToken } from "../controllers/authController";
+
 
 const router = Router();
 
@@ -21,5 +23,7 @@ router.post(
   "/reset-password/:token",
   resetPassword as unknown as express.RequestHandler
 );
+router.post("/refresh", refreshAccessToken as unknown as express.RequestHandler);
+
 
 export default router;

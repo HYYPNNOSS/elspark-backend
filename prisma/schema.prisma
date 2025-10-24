@@ -112,6 +112,18 @@ enum ChatStatus {
   ENDED
 }
 
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
 model User {
   id             Int      @id @default(autoincrement())
   username       String   @unique
@@ -134,6 +146,8 @@ model User {
   comments         Comment[]
   sentMessages     Message[] @relation("SentMessages")
   receivedMessages Message[] @relation("ReceivedMessages")
+  
+  refreshTokens RefreshToken[]
 
   sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
   receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
