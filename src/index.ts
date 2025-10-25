@@ -203,28 +203,32 @@ app.post('/api/coins/create-payment-intent', async (req, res) => {
     const { amount, coinAmount, userId } = req.body;
     
     // Validate user
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    // NEW:
+const profile = await prisma.profile.findUnique({
+  where: { id: userId },
+  include: { account: true }
+});
+
+if (!profile) {
+  res.status(404).json({ error: 'Profile not found' });
+  return;
+}
+
+// Use accountId for payment intent
+const paymentIntent = await stripe.paymentIntents.create({
+  amount: amount * 100,
+  currency: 'gbp',
+  metadata: {
+    accountId: profile.accountId.toString(),
+    coinAmount: coinAmount.toString(),
+  },
+  automatic_payment_methods: {
+    enabled: true,
+  },
+});
     
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return
-    }
-
-    // Create payment intent with GBP currency
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount * 100, // Stripe uses pence for GBP
-      currency: 'gbp',
-      metadata: {
-        userId: userId.toString(),
-        coinAmount: coinAmount.toString(),
-      },
-      automatic_payment_methods: {
-        enabled: true,
-      },
-    });
-
+    
+    
     res.json({
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
@@ -256,31 +260,30 @@ app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), a
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       
       try {
-        const userId = parseInt(paymentIntent.metadata.userId);
-        const coinAmount = parseInt(paymentIntent.metadata.coinAmount);
+       // NEW:
+const accountId = parseInt(paymentIntent.metadata.accountId);
+const coinAmount = parseInt(paymentIntent.metadata.coinAmount);
 
-        // Update user's coin balance
-        const updatedUser = await prisma.user.update({
-          where: { id: userId },
-          data: {
-            cyberCoins: {
-              increment: coinAmount
-            }
-          }
-        });
+const updatedAccount = await prisma.account.update({
+  where: { id: accountId },
+  data: {
+    cyberCoins: {
+      increment: coinAmount
+    }
+  }
+});
 
-        // Log the transaction
-        await prisma.coinTransaction.create({
-          data: {
-            userId: userId,
-            amount: coinAmount,
-            priceGBP: paymentIntent.amount / 100, // Convert from pence to pounds
-            stripePaymentIntentId: paymentIntent.id,
-            status: 'completed'
-          }
-        });
+await prisma.coinTransaction.create({
+  data: {
+    accountId: accountId,
+    amount: coinAmount,
+    priceGBP: paymentIntent.amount / 100,
+    stripePaymentIntentId: paymentIntent.id,
+    status: 'completed'
+  }
+});
 
-        console.log(`Payment succeeded for user ${userId}: +${coinAmount} coins`);
+console.log(`Payment succeeded for account ${accountId}: +${coinAmount} coins`);
       } catch (error) {
         console.error('Error processing successful payment:', error);
       }
@@ -295,7 +298,7 @@ app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), a
         const userId = parseInt(failedPayment.metadata.userId);
         await prisma.coinTransaction.create({
           data: {
-            userId: userId,
+            accountId: parseInt(failedPayment.metadata.accountId),
             amount: parseInt(failedPayment.metadata.coinAmount),
             priceGBP: failedPayment.amount / 100,
             stripePaymentIntentId: failedPayment.id,
@@ -315,14 +318,15 @@ app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), a
 });
 
 // Optional: Add route to get user's transaction history
-app.get('/api/coins/transactions/:userId', async (req, res) => {
+// NEW:
+app.get('/api/coins/transactions/:accountId', async (req, res) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const accountId = parseInt(req.params.accountId);
     
     const transactions = await prisma.coinTransaction.findMany({
-      where: { userId },
+      where: { accountId },
       orderBy: { createdAt: 'desc' },
-      take: 20 // Limit to last 20 transactions
+      take: 20
     });
 
     res.json(transactions);
@@ -566,33 +570,33 @@ io.on("connection", (socket) => {
   });
 
   // Handle user connection
-  socket.on("user_connected", async (userId: number) => {
-    console.log("User connected with ID:", userId);
+  socket.on("user_connected", async (profileId: number) => {
+    console.log("Profile connected with ID:", profileId);
   
-    if (!userId || typeof userId !== "number") {
-      console.error("Invalid userId received:", userId);
+    if (!profileId || typeof profileId !== "number") {
+      console.error("Invalid profileId received:", profileId);
       return;
     }
   
-    onlineUsers.set(userId, socket.id);
+    onlineUsers.set(profileId, socket.id);
   
-    await prisma.user.update({
-      where: { id: userId },
+    await prisma.profile.update({
+      where: { id: profileId },
       data: { online: true },
     });
   
     // NEW: Check for existing persistent connection
-    const existingConnection = persistentConnections.get(userId);
+    const existingConnection = persistentConnections.get(profileId);
     if (existingConnection && existingConnection.status === 'active') {
       const { partnerId, roomId } = existingConnection;
       
       // Rejoin the existing room
       socket.join(roomId);
-      activeRooms.set(userId, roomId);
+      activeRooms.set(profileId , roomId);
       
       // Add to room presence
       if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
-      roomPresence.get(roomId).add(userId);
+      roomPresence.get(roomId).add(profileId);
       
       // Notify client about existing connection
       socket.emit("reconnected_to_existing", { partnerId, roomId });
@@ -600,11 +604,11 @@ io.on("connection", (socket) => {
       // Notify partner that this user is back online (if partner is online)
       const partnerSocketId = onlineUsers.get(partnerId);
       if (partnerSocketId) {
-        io.to(partnerSocketId).emit("partner_back_online", { partnerId: userId });
+        io.to(partnerSocketId).emit("partner_back_online", { partnerId: profileId });
       }
     }
   
-    const users = await prisma.user.findMany({
+    const users = await prisma.profile.findMany({
       select: { id: true, username: true, profilePicture: true, online: true },
     });
   
@@ -613,14 +617,15 @@ io.on("connection", (socket) => {
   });
 
   // ========== Private Message ==========
-  socket.on("private_message", async ({ from, to, content }) => {
-    const newMessage = await prisma.message.create({
-      data: {
-        senderId: from,
-        receiverId: to,
-        content,
-      },
-    });
+  // NEW: (no changes needed in creation, but messages now reference profileId)
+socket.on("private_message", async ({ from, to, content }) => {
+  const newMessage = await prisma.message.create({
+    data: {
+      senderId: from,  // This is now profileId
+      receiverId: to,  // This is now profileId
+      content,
+    },
+  });
 
     const message = {
       id: newMessage.id,
@@ -639,57 +644,55 @@ io.on("connection", (socket) => {
 
   // ========== Random Match ==========
   // REPLACE your existing start_looking handler with this
-socket.on("start_looking", async (userId: number) => {
-  if (!userId || typeof userId !== "number") {
-    console.error("Invalid userId received:", userId);
+socket.on("start_looking", async (profileId: number) => {
+  if (!profileId || typeof profileId !== "number") {
+    console.error("Invalid profileId received:", profileId);
     return;
   }
 
-  // NEW: Don't start looking if user already has active connection
-  const existingConnection = persistentConnections.get(userId);
+  const existingConnection = persistentConnections.get(profileId);
   if (existingConnection && existingConnection.status === 'active') {
-    console.log("User already has active connection, not adding to queue");
+    console.log("Profile already has active connection, not adding to queue");
     return;
   }
 
-  await prisma.user.update({
-    where: { id: userId },
+  await prisma.profile.update({
+    where: { id: profileId },
     data: { looking: true },
   });
 
-  if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
+  // Replace userId with profileId throughout:
+  if (!lookingQueue.includes(profileId)) lookingQueue.push(profileId);
 
   if (lookingQueue.length >= 2) {
-    const [user1, user2] = lookingQueue.splice(0, 2);
-    const roomId = `room-${user1}-${user2}-${Date.now()}`;
+    const [profile1, profile2] = lookingQueue.splice(0, 2);
+    const roomId = `room-${profile1}-${profile2}-${Date.now()}`;
 
-    // Store in both old and new systems
-    activeRooms.set(user1, roomId);
-    activeRooms.set(user2, roomId);
+    activeRooms.set(profile1, roomId);
+    activeRooms.set(profile2, roomId);
 
-    // NEW: Create persistent connections
-    persistentConnections.set(user1, { 
-      partnerId: user2, 
+    persistentConnections.set(profile1, { 
+      partnerId: profile2, 
       roomId, 
       createdAt: Date.now(), 
       status: 'active' 
     });
-    persistentConnections.set(user2, { 
-      partnerId: user1, 
+    persistentConnections.set(profile2, { 
+      partnerId: profile1, 
       roomId, 
       createdAt: Date.now(), 
       status: 'active' 
     });
 
-    const socket1 = onlineUsers.get(user1);
-    const socket2 = onlineUsers.get(user2);
+    const socket1 = onlineUsers.get(profile1);
+    const socket2 = onlineUsers.get(profile2);
 
     if (socket1) {
-      io.to(socket1).emit("matched", { partnerId: user2, roomId });
+      io.to(socket1).emit("matched", { partnerId: profile2, roomId });
     }
 
     if (socket2) {
-      io.to(socket2).emit("matched", { partnerId: user1, roomId });
+      io.to(socket2).emit("matched", { partnerId: profile1, roomId });
     }
   }
 });
@@ -765,56 +768,49 @@ socket.on("send_message", ({ roomId, message }) => {
 
   // Skip current chat
   // REMOVE both existing skip handlers and REPLACE with this single one
-socket.on("skip", async (userId: number) => {
-  const roomId = activeRooms.get(userId);
-  const connection = persistentConnections.get(userId);
-
-  if (connection && connection.status === 'active') {
-    const { partnerId } = connection;
-    
-    // NEW: End persistent connections for both users
-    persistentConnections.set(userId, { ...connection, status: 'ended' });
-    const partnerConnection = persistentConnections.get(partnerId);
-    if (partnerConnection) {
-      persistentConnections.set(partnerId, { ...partnerConnection, status: 'ended' });
+  socket.on("skip", async (profileId: number) => {
+    const roomId = activeRooms.get(profileId);
+    const connection = persistentConnections.get(profileId);
+    if (connection && connection.status === 'active') {
+      const { partnerId } = connection;
+      
+      persistentConnections.set(profileId, { ...connection, status: 'ended' });
+      const partnerConnection = persistentConnections.get(partnerId);
+      if (partnerConnection) {
+        persistentConnections.set(partnerId, { ...partnerConnection, status: 'ended' });
+      }
+      
+      if (roomId) {
+        roomPresence.delete(roomId);
+      }
     }
-    
-    // Clean up room presence
+  
     if (roomId) {
-      roomPresence.delete(roomId);
+      io.to(roomId).emit("chat_ended");
+  
+      for (const [uid, rid] of activeRooms.entries()) {
+        if (rid === roomId) activeRooms.delete(uid);
+      }
     }
-  }
-
-  if (roomId) {
-    io.to(roomId).emit("chat_ended");
-
-    // Clean up activeRooms
-    for (const [uid, rid] of activeRooms.entries()) {
-      if (rid === roomId) activeRooms.delete(uid);
-    }
-  }
-
-  // Add back to looking queue
-  if (!lookingQueue.includes(userId)) lookingQueue.push(userId);
-  io.emit("looking_updated", lookingQueue);
-});
+  
+    if (!lookingQueue.includes(profileId)) lookingQueue.push(profileId);
+    io.emit("looking_updated", lookingQueue);
+  });
 
 // ADD this new handler (place it with your other socket handlers)
-socket.on("check_existing_connection", (userId: number) => {
-  const connection = persistentConnections.get(userId);
+// NEW:
+socket.on("check_existing_connection", (profileId: number) => {
+  const connection = persistentConnections.get(profileId);
   
   if (connection && connection.status === 'active') {
     const { partnerId, roomId } = connection;
     
-    // Rejoin room
     socket.join(roomId);
-    activeRooms.set(userId, roomId);
+    activeRooms.set(profileId, roomId);
     
-    // Update room presence
     if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
-    roomPresence.get(roomId).add(userId);
+    roomPresence.get(roomId).add(profileId);
     
-    // Check if partner is online
     const partnerOnline = onlineUsers.has(partnerId);
     const usersInRoom = Array.from(roomPresence.get(roomId));
     
@@ -831,47 +827,42 @@ socket.on("check_existing_connection", (userId: number) => {
 
   // ========== Handle Disconnect ==========
   // REPLACE your existing disconnect handler with this
+// NEW:
 socket.on("disconnect", async () => {
-  let disconnectedUserId: number | null = null;
+  let disconnectedProfileId: number | null = null;
 
-  for (const [userId, socketId] of onlineUsers.entries()) {
+  for (const [profileId, socketId] of onlineUsers.entries()) {
     if (socketId === socket.id) {
-      onlineUsers.delete(userId);
-      disconnectedUserId = userId;
+      onlineUsers.delete(profileId);
+      disconnectedProfileId = profileId;
       break;
     }
   }
 
-  if (disconnectedUserId !== null) {
-    await prisma.user.update({
-      where: { id: disconnectedUserId },
+  if (disconnectedProfileId !== null) {
+    await prisma.profile.update({
+      where: { id: disconnectedProfileId },
       data: { online: false, looking: false },
     });
 
     // NEW: Don't end chat on disconnect - keep persistent connection alive
-    const connection = persistentConnections.get(disconnectedUserId);
-    const roomId = activeRooms.get(disconnectedUserId);
+    const connection = persistentConnections.get(disconnectedProfileId);
+    const roomId = activeRooms.get(disconnectedProfileId);
     
     if (roomId && connection?.status === 'active') {
-      // Remove from room presence but keep connection alive
       const usersInRoom = roomPresence.get(roomId);
       if (usersInRoom) {
-        usersInRoom.delete(disconnectedUserId);
+        usersInRoom.delete(disconnectedProfileId);
         
-        // Notify partner that user left room (but connection still exists)
-        socket.to(roomId).emit("partner_left_room", { partnerId: disconnectedUserId });
+        socket.to(roomId).emit("partner_left_room", { partnerId: disconnectedProfileId });
       }
-      
-      // Don't emit "chat_ended" - connection persists!
-      // Don't clean up activeRooms - user can rejoin
     }
 
-    // Remove from looking queue
-    const index = lookingQueue.indexOf(disconnectedUserId);
+    const index = lookingQueue.indexOf(disconnectedProfileId);
     if (index !== -1) lookingQueue.splice(index, 1);
   }
 
-  const users = await prisma.user.findMany({
+  const users = await prisma.profile.findMany({
     select: { id: true, username: true, profilePicture: true, online: true },
   });
 

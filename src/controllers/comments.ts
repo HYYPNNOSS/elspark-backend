@@ -53,7 +53,7 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
       });
   
       // GET THE COMMENTER'S USERNAME
-      const commenter = await prisma.user.findUnique({
+      const commenter = await prisma.profile.findUnique({
         where: { id: userId },
         select: { username: true }
       });

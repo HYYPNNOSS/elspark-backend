@@ -497,12 +497,12 @@ export function setupGameWebSocket(io: Server) {
         startedAt: new Date(),
         players: {
           create: players.map((userId) => ({
-            user: { connect: { id: userId } },
+            profile: { connect: { id: userId } },
           })),
         },
       },
       include: {
-        players: { include: { user: true } },
+        players: { include: { profile: true } },
       },
     });
   
@@ -527,7 +527,7 @@ export function setupGameWebSocket(io: Server) {
   
     boardSessions[gameSession.id] = boardSession;
   
-    await prisma.user.updateMany({
+    await prisma.profile.updateMany({
       where: { id: { in: players } },
       data: { looking: false, isonrand: true },
     });

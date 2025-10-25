@@ -68,7 +68,7 @@ export class GameQueueService {
       console.log(`➕ Regular player ${userId} added to back of queue`);
     }
   
-    await prisma.user.updateMany({
+    await prisma.profile.updateMany({
       where: { id: userId },
       data: { looking: true }
     });
@@ -111,7 +111,7 @@ export class GameQueueService {
       this.queueTimers.delete(userId);
     }
   
-    await prisma.user.updateMany({
+    await prisma.profile.updateMany({
       where: { id: userId },
       data: { looking: false }
     });
@@ -197,7 +197,7 @@ export class GameQueueService {
         console.log("keeping socket and color for player in game:", userId);
       }
   
-      await prisma.user.updateMany({
+      await prisma.profile.updateMany({
         where: { id: userId },
         data: { looking: false }
       });
@@ -225,7 +225,7 @@ export class GameQueueService {
       this.playersInGame.add(pid);
     });
   
-    const playerRecords = await prisma.user.findMany({
+    const playerRecords = await prisma.profile.findMany({
       where: { id: { in: selectedPlayers } },
       select: { id: true, username: true }
     });
@@ -235,10 +235,10 @@ export class GameQueueService {
         status: 'IN_PROGRESS',
         startedAt: new Date(),
         players: {
-          create: selectedPlayers.map(id => ({ user: { connect: { id } } }))
+          create: selectedPlayers.map(id => ({ profile: { connect: { id } } }))
         }
       },
-      include: { players: { include: { user: true } } }
+      include: { players: { include: { profile: true } } }
     });
   
     const inMemoryGame: InMemoryGame = {
@@ -254,7 +254,7 @@ export class GameQueueService {
     this.activeSessions.set(gameSession.id, inMemoryGame);
   
     // Update database
-    await prisma.user.updateMany({
+    await prisma.profile.updateMany({
       where: { id: { in: selectedPlayers } },
       data: { looking: false, isonrand: true }
     });

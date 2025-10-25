@@ -7,12 +7,108 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ===== ACCOUNT & PROFILE MODELS =====
 
+model Account {
+  id               Int      @id @default(autoincrement())
+  email            String   @unique
+  password         String
+  cyberCoins       Decimal  @default(5) @db.Decimal(10, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  profiles         Profile[]
+  refreshTokens    AccountRefreshToken[]
+  coinTransactions CoinTransaction[] @relation("AccountTransactions")
+  resetTokens      PasswordResetToken[]
+  
+  @@map("accounts")
+}
+
+model Profile {
+  id             Int      @id @default(autoincrement())
+  accountId      Int
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  username       String   @unique
+  profilePicture String   @default("/uploads/profiles/profile-default.jpg")
+  bio            String?  @db.Text
+  color          String?
+  
+  isActive       Boolean  @default(false) // Currently selected profile
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  online         Boolean  @default(false)
+  isonrand       Boolean  @default(false)
+  looking        Boolean  @default(false)
+  
+  posts                  Post[]           @relation("PostAuthors")
+  coownedPosts           PostCoowner[]
+  collections            PostCollection[]
+  comments               Comment[]
+  
+  sentMessages           Message[] @relation("SentMessages")
+  receivedMessages       Message[] @relation("ReceivedMessages")
+  
+  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+  friends                Friendship[]    @relation("UserFriends")
+  friendOf               Friendship[]    @relation("FriendOf")
+  
+  following              Follow[] @relation("UserFollowing")
+  followers              Follow[] @relation("UserFollowers")
+  
+  chatAsUser1            ChatConnection[] @relation("ChatUser1")
+  chatAsUser2            ChatConnection[] @relation("ChatUser2")
+  
+  gameStats              GameStats[]
+  notifications          Notification[] 
+  playerInGames          PlayerInGame[]
+  
+  aiMessages             AIMsg[]
+  aiSessions             AISession[]
+  
+  isMooshi               Boolean  @default(false)
+  isApproved             Boolean  @default(false)
+  mooshiNumber           Int?     @unique
+  journal                Json?
+  mooshiConv             Json?
+  
+  @@map("profiles")
+}
+
+model AccountRefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  accountId Int
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profileId Int?     // Track which profile this token is for
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([token])
+  @@map("account_refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  accountId Int
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([token])
+  @@map("password_reset_tokens")
+}
+
+// ===== GAME MODELS =====
 
 model GameStats {
   id        String   @id @default(uuid())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profileId Int
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   wins      Int      @default(0)
   losses    Int      @default(0)
   draws     Int      @default(0)
@@ -37,11 +133,11 @@ model PlayerInGame {
   id            String      @id @default(uuid())
   gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
   gameSessionId String
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId        Int
+  profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId     Int
   createdAt     DateTime    @default(now())
 
-  @@unique([gameSessionId, userId])
+  @@unique([gameSessionId, profileId])
 }
 
 model BotInGame {
@@ -61,6 +157,7 @@ enum GameStatus {
   ABANDONED
 }
 
+// ===== SOCIAL MODELS =====
 
 model Follow {
   id          Int      @id @default(autoincrement())
@@ -68,40 +165,24 @@ model Follow {
   followingId Int
   createdAt   DateTime @default(now())
 
-  follower  User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
-  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+  follower  Profile @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following Profile @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
   @@map("follows")
 }
 
-model CoinTransaction {
-  id                    Int      @id @default(autoincrement())
-  userId                Int
-  amount                Int      
-  priceGBP              Float    
-  stripePaymentIntentId String   @unique
-  status                String   // 'pending', 'completed', 'failed'
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@map("coin_transactions")
-}
-
-
 model ChatConnection {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   user1Id   Int
   user2Id   Int
-  roomId    String   @unique
+  roomId    String     @unique
   status    ChatStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
+  createdAt DateTime   @default(now())
   endedAt   DateTime?
 
-  user1 User @relation("ChatUser1", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2 User @relation("ChatUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  user1 Profile @relation("ChatUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 Profile @relation("ChatUser2", fields: [user2Id], references: [id], onDelete: Cascade)
 
   @@unique([user1Id, user2Id])
   @@map("chat_connections")
@@ -112,98 +193,85 @@ enum ChatStatus {
   ENDED
 }
 
-model RefreshToken {
+model FriendRequest {
+  id         Int      @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+
+  sender   Profile @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver Profile @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@map("friend_requests")
+}
+
+model Friendship {
   id        Int      @id @default(autoincrement())
-  token     String   @unique
   userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
+  friendId  Int
   createdAt DateTime @default(now())
 
-  @@index([token])
-  @@map("refresh_tokens")
+  user   Profile @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
+  friend Profile @relation("FriendOf", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@map("friendships")
 }
 
-model User {
-  id             Int      @id @default(autoincrement())
-  username       String   @unique
-  email          String   @unique
-  password       String
-  profilePicture String   @default("/uploads/profiles/profile-default.jpg")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  bio            String? @db.Text
+model Message {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
 
+  senderId   Int
+  receiverId Int
 
-  online   Boolean @default(false)
-  isonrand Boolean @default(false)
-  looking  Boolean @default(false)
+  sender   Profile @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver Profile @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
 
-  posts        Post[]           @relation("PostAuthors")
-  coownedPosts PostCoowner[]
-  collections  PostCollection[]
+  @@map("messages")
+}
 
+// ===== CONTENT MODELS =====
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  text      String?  @db.Text
+  title     String? 
+  imageUrl  String?
+  videoUrl  String?
+  isPrivate Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  authorId Int
+  author   Profile @relation("PostAuthors", fields: [authorId], references: [id], onDelete: Cascade)
+
+  coowners         PostCoowner[]
+  collections      PostCollection[]
   comments         Comment[]
-  sentMessages     Message[] @relation("SentMessages")
-  receivedMessages Message[] @relation("ReceivedMessages")
-  
-  refreshTokens RefreshToken[]
+  PostInCollection PostInCollection[]
 
-  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
-  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
-  friends                Friendship[]    @relation("UserFriends")
-  friendOf               Friendship[]    @relation("FriendOf")
-
-  following Follow[] @relation("UserFollowing")
-  followers Follow[] @relation("UserFollowers")
-
-  chatAsUser1 ChatConnection[] @relation("ChatUser1")
-  chatAsUser2 ChatConnection[] @relation("ChatUser2")
-
-  cyberCoins    Decimal        @default(5)      @db.Decimal(10, 2)
-  gameStats     GameStats[]
-  notifications Notification[] 
-
-  playerInGames PlayerInGame[]
-
-  coinTransactions CoinTransaction[]
-
-  resetTokens PasswordResetToken[]
-  aiMessages  AIMsg[]
-  aiSessions  AISession[]
-
-  isMooshi     Boolean  @default(false)
-  isApproved   Boolean  @default(false)
-  color        String?  
-  mooshiNumber Int?     @unique
-  journal   Json?
-  mooshiConv Json?
-
-
-  @@map("users")
+  @@map("posts")
 }
 
+model PostCoowner {
+  post   Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId Int
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
 
-
-model Notification {
-  id          String   @id @default(cuid())
-  type        String   
-  message     String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      Int      
-  postId      String?
-  route       String?
-  commentId   String?
-  read        Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  @@id([postId, userId])
+  @@map("post_coowners")
 }
-
 
 model PostCollection {
   id        Int      @id @default(autoincrement())
   title     String
   userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   posts  PostInCollection[]
@@ -225,51 +293,6 @@ model PostInCollection {
   @@map("post_in_collections")
 }
 
-model PasswordResetToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-
-  createdAt DateTime @default(now())
-
-  @@index([token])
-  @@map("password_reset_tokens")
-}
-
-model Post {
-  id        Int      @id @default(autoincrement())
-  text      String?  @db.Text
-  title    String? 
-  imageUrl  String?
-  videoUrl  String?
-  isPrivate Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  authorId Int
-  author   User @relation("PostAuthors", fields: [authorId], references: [id], onDelete: Cascade)
-
-  coowners    PostCoowner[]
-  collections PostCollection[]
-
-  comments         Comment[]
-  PostInCollection PostInCollection[]
-
-  @@map("posts")
-}
-
-model PostCoowner {
-  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  postId Int
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int
-
-  @@id([postId, userId])
-  @@map("post_coowners")
-}
-
 model Comment {
   id        Int      @id @default(autoincrement())
   content   String
@@ -277,7 +300,7 @@ model Comment {
   updatedAt DateTime @updatedAt
 
   authorId Int
-  author   User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author   Profile @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   postId Int?
   post   Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -289,70 +312,61 @@ model Comment {
   @@map("comments")
 }
 
-model FriendRequest {
-  id         Int      @id @default(autoincrement())
-  senderId   Int
-  receiverId Int
-  status     String   @default("pending")
-  createdAt  DateTime @default(now())
-
-  sender   User @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver User @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  @@unique([senderId, receiverId])
-  @@map("friend_requests")
-}
-
-model Friendship {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  friendId  Int
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   
+  message   String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId Int      
+  postId    String?
+  route     String?
+  commentId String?
+  read      Boolean  @default(false)
   createdAt DateTime @default(now())
-
-  user   User @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
-  friend User @relation("FriendOf", fields: [friendId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, friendId])
-  @@map("friendships")
 }
 
-model Message {
-  id        Int      @id @default(autoincrement())
-  content   String
-  createdAt DateTime @default(now())
+// ===== PAYMENT MODELS =====
 
-  senderId   Int
-  receiverId Int
-
-  sender   User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  @@map("messages")
+model CoinTransaction {
+  id                    Int      @id @default(autoincrement())
+  accountId             Int
+  amount                Int      
+  priceGBP              Float    
+  stripePaymentIntentId String   @unique
+  status                String   // 'pending', 'completed', 'failed'
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  account               Account  @relation("AccountTransactions", fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@map("coin_transactions")
 }
+
+// ===== AI MODELS =====
 
 model AIMsg {
   id        Int      @id @default(autoincrement())
-  userId    Int
-  sender    String //hello nariman here either 'user' or 'bot'
+  profileId Int
+  sender    String   // either 'user' or 'bot'
   message   String   @db.Text
   sessionId String? 
   createdAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@map("ai_messages")
 }
 
 model AISession {
   id        String   @id @default(uuid())
-  userId    Int
+  profileId Int
   botId     Int
-  duration  Int // and in minutes
+  duration  Int      // in minutes
   startTime DateTime @default(now())
   endTime   DateTime
   isActive  Boolean  @default(true)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@map("ai_sessions")
 }

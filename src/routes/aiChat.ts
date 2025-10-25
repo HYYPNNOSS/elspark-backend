@@ -97,7 +97,7 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
-        userId,
+        profileId : userId,
         isActive: true,
         endTime: { gt: new Date() }
       }
@@ -112,7 +112,7 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
     // Store user message
     await prisma.aIMsg.create({
       data: {
-        userId,
+        profileId : userId,
         sender: 'user',
         message,
         sessionId
@@ -125,7 +125,7 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
     // Store AI response
     await prisma.aIMsg.create({
       data: {
-        userId,
+        profileId: userId,
         sender: 'bot',
         message: aiResponse,
         sessionId
@@ -156,7 +156,7 @@ router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) 
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
-        userId
+        profileId : userId
       }
     });
 
@@ -172,7 +172,7 @@ router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) 
     const messages = await prisma.aIMsg.findMany({
       where: {
         sessionId,
-        userId
+        profileId : userId
       },
       orderBy: {
         createdAt: 'asc'

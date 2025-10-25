@@ -2,13 +2,14 @@ import express, { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { aiMiddleware } from '../middlewares/aiMiddleware'; 
 
-
 const router = express.Router();
 const prisma = new PrismaClient();
 
 interface AuthRequest extends Request {
   user?: {
     userId: number;
+    profileId: number;
+    accountId: number;
     email: string;
   };
 }
@@ -18,42 +19,46 @@ interface BotConfig {
   emoji: string;
 }
 
-
-
-// POST /api/ai-sessions - Create new AI session
 // POST /api/ai-sessions - Create new AI session
 router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { botId, duration, cost }: { botId: number; duration: number; cost: number } = req.body;
-    const userId = req.user!.userId;
-    console.log("userId");
-    console.log(userId);
-    console.log("userId");
+    const profileId = req.user?.profileId || req.user?.userId;
+    const accountId = req.user?.accountId;
 
-    if (!req.user) {
+    console.log("profileId:", profileId);
+    console.log("accountId:", accountId);
+
+    if (!req.user || !profileId) {
       console.log("Unauthorized: no user in request");
       res.status(401).json({ error: 'Unauthorized: no user in request' });
-      return
+      return;
     }
 
-    // Check user has enough coins
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
+    // Get profile with account data
+    const profile = await prisma.profile.findUnique({
+      where: { id: profileId },
+      include: { account: true }
     });
 
-    // Convert Decimal to number for comparison
-    const userCoins = user?.cyberCoins ? Number(user.cyberCoins) : 0;
-
-    if (!user || userCoins < cost) {
-      res.status(400).json({ error: 'Insufficient coins' });
-      return
+    if (!profile) {
+      res.status(404).json({ error: 'Profile not found' });
+      return;
     }
 
-    // Create AI session
+    // Convert Decimal to number for comparison
+    const userCoins = profile.account.cyberCoins ? Number(profile.account.cyberCoins) : 0;
+
+    if (userCoins < cost) {
+      res.status(400).json({ error: 'Insufficient coins' });
+      return;
+    }
+
+    // Create AI session linked to profile
     const endTime = new Date(Date.now() + duration * 60 * 1000);
     const session = await prisma.aISession.create({
       data: {
-        userId,
+        profileId: profileId, // userId field now references profileId
         botId,
         duration,
         endTime,
@@ -61,9 +66,9 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Deduct coins using decrement
-    await prisma.user.update({
-      where: { id: userId },
+    // Deduct coins from account using decrement
+    await prisma.account.update({
+      where: { id: profile.accountId },
       data: { cyberCoins: { decrement: cost } }
     });
 
@@ -81,7 +86,13 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
 // GET /api/ai-sessions/active - Get user's active sessions
 router.get('/active', aiMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.user!.userId;
+    const profileId = req.user?.profileId || req.user?.userId;
+    
+    if (!profileId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
     const now = new Date();
 
     const BOT_CONFIG: Record<number, BotConfig> = {
@@ -91,10 +102,10 @@ router.get('/active', aiMiddleware, async (req: AuthRequest, res: Response) => {
       4: { name: "Zainab", emoji: "🏊‍♀️" }
     };
 
-    // Get active sessions
+    // Get active sessions for this profile
     const sessions = await prisma.aISession.findMany({
       where: {
-        userId,
+        profileId: profileId, // userId field references profileId
         isActive: true,
         endTime: { gt: now }
       }

@@ -1,176 +1,275 @@
 import express, { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 
-
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// GET /users - Get all users with statistics
+// GET /users - Get all profiles with statistics
 router.get('/users', async (req: Request, res: Response) => {
-    try {
-      // Get all users (excluding sensitive data like passwords)
-      const users = await prisma.user.findMany({
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          isApproved: true,
-          isMooshi: true,
-          online: true,
-          createdAt: true,
-          updatedAt: true,
-          mooshiNumber: true,
-          profilePicture: true,
-          bio: true,
-          cyberCoins: true,
-          color: true
-        },
-        orderBy: [
-          { isMooshi: 'asc' }, // Non-Mooshis first
-          { createdAt: 'desc' } // Then by creation date
-        ]
+  try {
+    // Get all profiles (excluding sensitive data)
+    const profiles = await prisma.profile.findMany({
+      select: {
+        id: true,
+        username: true,
+        isApproved: true,
+        isMooshi: true,
+        online: true,
+        createdAt: true,
+        updatedAt: true,
+        mooshiNumber: true,
+        profilePicture: true,
+        bio: true,
+        color: true,
+        accountId: true,
+        account: {
+          select: {
+            email: true,
+            cyberCoins: true
+          }
+        }
+      },
+      orderBy: [
+        { isMooshi: 'asc' }, // Non-Mooshis first
+        { createdAt: 'desc' } // Then by creation date
+      ]
+    });
+
+    // Transform to include email and cyberCoins at profile level
+    const users = profiles.map(profile => ({
+      id: profile.id,
+      username: profile.username,
+      email: profile.account.email,
+      isApproved: profile.isApproved,
+      isMooshi: profile.isMooshi,
+      online: profile.online,
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+      mooshiNumber: profile.mooshiNumber,
+      profilePicture: profile.profilePicture,
+      bio: profile.bio,
+      cyberCoins: Number(profile.account.cyberCoins),
+      color: profile.color,
+      accountId: profile.accountId
+    }));
+
+    // Calculate statistics
+    const mooshis = users.filter(user => user.isMooshi);
+    const regularUsers = users.filter(user => !user.isMooshi);
+    const approvedUsers = regularUsers.filter(user => user.isApproved).length;
+    const pendingUsers = regularUsers.filter(user => !user.isApproved).length;
+    const onlineUsers = users.filter(user => user.online).length;
+
+    const stats = {
+      totalUsers: regularUsers.length, // Only count regular profiles in total
+      approvedUsers,
+      pendingUsers,
+      onlineUsers,
+      totalMooshis: mooshis.length
+    };
+
+    res.status(200).json({
+      success: true,
+      users: users,
+      stats: stats,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error fetching admin users:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch users',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// PUT /users/:id/approval - Update profile approval status
+router.put('/users/:id/approval', async (req: Request, res: Response) => {
+  try {
+    const profileId = parseInt(req.params.id);
+    const { isApproved } = req.body;
+
+    // Validate input
+    if (isNaN(profileId)) {
+      res.status(400).json({ 
+        success: false,
+        error: 'Invalid profile ID' 
       });
-  
-      // Calculate statistics
-      const totalUsers = users.length;
-      const mooshis = users.filter(user => user.isMooshi);
-      const regularUsers = users.filter(user => !user.isMooshi);
-      const approvedUsers = regularUsers.filter(user => user.isApproved).length;
-      const pendingUsers = regularUsers.filter(user => !user.isApproved).length;
-      const onlineUsers = users.filter(user => user.online).length;
-  
-      const stats = {
-        totalUsers: regularUsers.length, // Only count regular users in total
+      return;
+    }
+
+    if (typeof isApproved !== 'boolean') {
+      res.status(400).json({ 
+        success: false,
+        error: 'isApproved must be a boolean value' 
+      });
+      return;
+    }
+
+    // Check if profile exists and is not a Mooshi
+    const existingProfile = await prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { 
+        id: true, 
+        username: true, 
+        isMooshi: true, 
+        isApproved: true,
+        account: {
+          select: {
+            email: true
+          }
+        }
+      }
+    });
+
+    if (!existingProfile) {
+      res.status(404).json({ 
+        success: false,
+        error: 'Profile not found' 
+      });
+      return;
+    }
+
+    if (existingProfile.isMooshi) {
+      res.status(400).json({ 
+        success: false,
+        error: 'Cannot modify approval status of Mooshi accounts' 
+      });
+      return;
+    }
+
+    // Update profile approval status
+    const updatedProfile = await prisma.profile.update({
+      where: { id: profileId },
+      data: { isApproved },
+      select: {
+        id: true,
+        username: true,
+        isApproved: true,
+        updatedAt: true,
+        account: {
+          select: {
+            email: true
+          }
+        }
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Profile ${updatedProfile.username} ${isApproved ? 'approved' : 'approval revoked'}`,
+      user: {
+        id: updatedProfile.id,
+        username: updatedProfile.username,
+        email: updatedProfile.account.email,
+        isApproved: updatedProfile.isApproved,
+        updatedAt: updatedProfile.updatedAt
+      },
+      previousStatus: existingProfile.isApproved,
+      newStatus: isApproved
+    });
+
+  } catch (error) {
+    console.error('Error updating profile approval:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update profile approval status',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// GET /stats - Get just the statistics (lighter endpoint)
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const [totalUsers, approvedUsers, onlineUsers, totalMooshis] = await Promise.all([
+      prisma.profile.count({ where: { isMooshi: false } }),
+      prisma.profile.count({ where: { isMooshi: false, isApproved: true } }),
+      prisma.profile.count({ where: { online: true } }),
+      prisma.profile.count({ where: { isMooshi: true } })
+    ]);
+
+    const pendingUsers = totalUsers - approvedUsers;
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        totalUsers,
         approvedUsers,
         pendingUsers,
         onlineUsers,
-        totalMooshis: mooshis.length
-      };
-  
-      res.status(200).json({
-        success: true,
-        users: users,
-        stats: stats,
-        timestamp: new Date().toISOString()
-      });
-  
-    } catch (error) {
-      console.error('Error fetching admin users:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Failed to fetch users',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-  
-  // PUT /users/:id/approval - Update user approval status
-  router.put('/users/:id/approval', async (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(req.params.id);
-      const { isApproved } = req.body;
-  
-      // Validate input
-      if (isNaN(userId)) {
-        res.status(400).json({ 
-          success: false,
-          error: 'Invalid user ID' 
-        });
-        return;
-      }
-  
-      if (typeof isApproved !== 'boolean') {
-        res.status(400).json({ 
-          success: false,
-          error: 'isApproved must be a boolean value' 
-        });
-        return;
-      }
-  
-      // Check if user exists and is not a Mooshi
-      const existingUser = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, username: true, isMooshi: true, isApproved: true }
-      });
-  
-      if (!existingUser) {
-        res.status(404).json({ 
-          success: false,
-          error: 'User not found' 
-        });
-        return;
-      }
-  
-      if (existingUser.isMooshi) {
-        res.status(400).json({ 
-          success: false,
-          error: 'Cannot modify approval status of Mooshi accounts' 
-        });
-        return;
-      }
-  
-      // Update user approval status
-      const updatedUser = await prisma.user.update({
-        where: { id: userId },
-        data: { isApproved },
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          isApproved: true,
-          updatedAt: true
+        totalMooshis
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error fetching admin stats:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch statistics' 
+    });
+  }
+});
+
+// Optional: GET /accounts - Get all accounts with their profiles
+router.get('/accounts', async (req: Request, res: Response) => {
+  try {
+    const accounts = await prisma.account.findMany({
+      select: {
+        id: true,
+        email: true,
+        cyberCoins: true,
+        createdAt: true,
+        updatedAt: true,
+        profiles: {
+          select: {
+            id: true,
+            username: true,
+            isApproved: true,
+            isMooshi: true,
+            online: true,
+            profilePicture: true,
+            isActive: true
+          }
         }
-      });
-  
-      res.status(200).json({
-        success: true,
-        message: `User ${updatedUser.username} ${isApproved ? 'approved' : 'approval revoked'}`,
-        user: updatedUser,
-        previousStatus: existingUser.isApproved,
-        newStatus: isApproved
-      });
-  
-    } catch (error) {
-      console.error('Error updating user approval:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Failed to update user approval status',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-  
-  // Optional: GET /stats - Get just the statistics (lighter endpoint)
-  router.get('/stats', async (req: Request, res: Response) => {
-    try {
-      const [totalUsers, approvedUsers, onlineUsers, totalMooshis] = await Promise.all([
-        prisma.user.count({ where: { isMooshi: false } }),
-        prisma.user.count({ where: { isMooshi: false, isApproved: true } }),
-        prisma.user.count({ where: { online: true } }),
-        prisma.user.count({ where: { isMooshi: true } })
-      ]);
-  
-      const pendingUsers = totalUsers - approvedUsers;
-  
-      res.status(200).json({
-        success: true,
-        stats: {
-          totalUsers,
-          approvedUsers,
-          pendingUsers,
-          onlineUsers,
-          totalMooshis
-        },
-        timestamp: new Date().toISOString()
-      });
-  
-    } catch (error) {
-      console.error('Error fetching admin stats:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Failed to fetch statistics' 
-      });
-    }
-  });
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Calculate statistics
+    const totalAccounts = accounts.length;
+    const accountsWithMultipleProfiles = accounts.filter(acc => acc.profiles.length > 1).length;
+    const totalProfiles = accounts.reduce((sum, acc) => sum + acc.profiles.length, 0);
+
+    res.status(200).json({
+      success: true,
+      accounts: accounts.map(acc => ({
+        ...acc,
+        cyberCoins: Number(acc.cyberCoins),
+        profileCount: acc.profiles.length
+      })),
+      stats: {
+        totalAccounts,
+        accountsWithMultipleProfiles,
+        totalProfiles,
+        averageProfilesPerAccount: (totalProfiles / totalAccounts).toFixed(2)
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error fetching accounts:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch accounts',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 
 export default router;

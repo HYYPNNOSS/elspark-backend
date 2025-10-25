@@ -6,36 +6,36 @@ const notificationsRouter = Router();
 
 // Interface for authenticated request
 interface AuthRequest extends Request {
-  user?: { id: number; username: string };
+  user?: { id: number; profileId: number; username: string };
 }
 
 // Middleware to verify token (you should already have this)
 const verifyToken = (req: any, res: any, next: any) => {
   // Your existing token verification middleware
-  // This should set req.user with id and username
+  // This should set req.user with profileId and username
   next();
 };
 
-
+// GET /api/notifications/all - Get all notifications for a profile
 notificationsRouter.get("/all", async (req: any, res) => {
-  const userId = parseInt(req.query.userId as string);
+  const profileId = parseInt(req.query.userId as string); // Keep param name for backwards compatibility
 
-  if (!userId || isNaN(userId)) {
-    res.status(400).json({ error: "Valid userId is required" });
+  if (!profileId || isNaN(profileId)) {
+    res.status(400).json({ error: "Valid profileId is required" });
     return;
   }
 
   try {
-    // ✅ Check if the user exists first
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      res.status(404).json({ error: "User not found" });
-      return
+    // ✅ Check if the profile exists first
+    const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+    if (!profile) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
     }
 
-    // ✅ Get notifications only for that user
+    // ✅ Get notifications only for that profile
     const notifications = await prisma.notification.findMany({
-      where: { userId },
+      where: { profileId: profileId }, // userId field now references profileId
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -47,28 +47,27 @@ notificationsRouter.get("/all", async (req: any, res) => {
   }
 });
 
-
 // POST /api/notifications - Create a new notification
 notificationsRouter.post("/", verifyToken, async (req: any, res) => {
   const { type, message, userId, postId, commentId, route } = req.body;
 
   // Validate required fields
   if (!type || !message || !userId) {
-    res.status(400).json({ 
-      error: "Type, message, and userId are required" 
+    res.status(400).json({
+      error: "Type, message, and userId are required",
     });
     return;
   }
 
   try {
-    // Check if target user exists
-    const targetUser = await prisma.user.findUnique({
+    // Check if target profile exists (userId is actually profileId)
+    const targetProfile = await prisma.profile.findUnique({
       where: { id: userId },
-      select: { id: true }
+      select: { id: true },
     });
 
-    if (!targetUser) {
-      res.status(404).json({ error: "Target user not found" });
+    if (!targetProfile) {
+      res.status(404).json({ error: "Target profile not found" });
       return;
     }
 
@@ -77,12 +76,11 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
       data: {
         type,
         message,
-        userId,
+        profileId: userId,
         postId: postId || null,
         commentId: commentId || null,
-        route: route || null
-      },
-    });
+        route: route || null,
+  }});
 
     res.status(201).json(notification);
   } catch (error) {
@@ -94,18 +92,18 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
 // PUT /api/notifications/:id/read - Mark notification as read
 notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
   const { id } = req.params;
-  const userId = req.user?.id;
+  const profileId = req.user?.profileId || req.user?.id;
 
-  if (!userId) {
+  if (!profileId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
-    // Check if notification belongs to current user
+    // Check if notification belongs to current profile
     const notification = await prisma.notification.findUnique({
       where: { id },
-      select: { userId: true }
+      select: { profileId: true },
     });
 
     if (!notification) {
@@ -113,8 +111,10 @@ notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
       return;
     }
 
-    if (notification.userId !== userId) {
-      res.status(403).json({ error: "Cannot mark other user's notifications as read" });
+    if (notification.profileId !== profileId) {
+      res
+        .status(403)
+        .json({ error: "Cannot mark other profile's notifications as read" });
       return;
     }
 
@@ -131,27 +131,27 @@ notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
   }
 });
 
-// PUT /api/notifications/mark-all-read - Mark all notifications as read for current user
+// PUT /api/notifications/mark-all-read - Mark all notifications as read for current profile
 notificationsRouter.put("/mark-all-read", verifyToken, async (req: any, res) => {
-  const userId = req.user?.id;
+  const profileId = req.user?.profileId || req.user?.id;
 
-  if (!userId) {
+  if (!profileId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
     const result = await prisma.notification.updateMany({
-      where: { 
-        userId,
-        read: false 
+      where: {
+        profileId: profileId,
+        read: false,
       },
       data: { read: true },
     });
 
-    res.json({ 
-      message: "All notifications marked as read", 
-      count: result.count 
+    res.json({
+      message: "All notifications marked as read",
+      count: result.count,
     });
   } catch (error) {
     console.error("Error marking all notifications as read:", error);
@@ -161,18 +161,18 @@ notificationsRouter.put("/mark-all-read", verifyToken, async (req: any, res) => 
 
 // GET /api/notifications/unread-count - Get count of unread notifications
 notificationsRouter.get("/unread-count", verifyToken, async (req: any, res) => {
-  const userId = req.user?.id;
+  const profileId = req.user?.profileId || req.user?.id;
 
-  if (!userId) {
+  if (!profileId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
     const count = await prisma.notification.count({
-      where: { 
-        userId,
-        read: false 
+      where: {
+        profileId: profileId,
+        read: false,
       },
     });
 
@@ -186,18 +186,18 @@ notificationsRouter.get("/unread-count", verifyToken, async (req: any, res) => {
 // DELETE /api/notifications/:id - Delete a specific notification
 notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
   const { id } = req.params;
-  const userId = req.user?.id;
+  const profileId = req.user?.profileId || req.user?.id;
 
-  if (!userId) {
+  if (!profileId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
-    // Check if notification belongs to current user
+    // Check if notification belongs to current profile
     const notification = await prisma.notification.findUnique({
       where: { id },
-      select: { userId: true }
+      select: { profileId: true },
     });
 
     if (!notification) {
@@ -205,8 +205,10 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
       return;
     }
 
-    if (notification.userId !== userId) {
-      res.status(403).json({ error: "Cannot delete other user's notifications" });
+    if (notification.profileId !== profileId) {
+      res
+        .status(403)
+        .json({ error: "Cannot delete other profile's notifications" });
       return;
     }
 
@@ -226,7 +228,7 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
 export const createNotification = async (
   type: string,
   message: string,
-  userId: number,
+  profileId: number, // Changed from userId to profileId for clarity
   postId?: string,
   commentId?: string,
   route?: string
@@ -236,7 +238,7 @@ export const createNotification = async (
       data: {
         type,
         message,
-        userId,
+        profileId: profileId, // userId field in schema references profileId
         postId: postId || null,
         commentId: commentId || null,
         route: route || null,

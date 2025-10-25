@@ -35,12 +35,12 @@ router.post('/buy', mockAuth, async (req: AuthenticatedRequest, res: Response) =
   }
 
   try {
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await prisma.account.update({
         where: { id: req.userId! },
         data: { cyberCoins: { increment: amount } },
         select: {
           id: true,
-          username: true,
+          // username: true,
           cyberCoins: true
         }
       });

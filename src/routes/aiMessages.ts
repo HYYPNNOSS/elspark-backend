@@ -25,7 +25,7 @@ router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) 
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
-        userId
+        profileId: userId
       }
     });
 
@@ -37,7 +37,7 @@ router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) 
     // Get messages for this session
     const messages = await prisma.aIMsg.findMany({
       where: {
-        userId,
+        profileId: userId,
         sessionId
       },
       orderBy: { createdAt: 'asc' }

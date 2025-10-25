@@ -24,7 +24,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
   
     try {
       // Check if user to follow exists
-      const userToFollow = await prisma.user.findUnique({
+      const userToFollow = await prisma.profile.findUnique({
         where: { id: userId },
         select: { id: true, username: true },
       });
@@ -64,7 +64,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         data: {
           type: "follow",
           message: `${req.user.username} started following you`,
-          userId: userId,
+          profileId: userId,
         },
       });
 
@@ -107,7 +107,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
   
     try {
       // Check if user exists
-      const userToUnfollow = await prisma.user.findUnique({
+      const userToUnfollow = await prisma.profile.findUnique({
         where: { id: userId },
         select: { id: true, username: true },
       });

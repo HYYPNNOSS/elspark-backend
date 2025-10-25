@@ -4,8 +4,13 @@ import {
   signin,
   forgotPassword,
   resetPassword,
+  getProfiles,
+  switchProfile,
+  createProfile,
 } from "../controllers/authController";
 import { refreshAccessToken } from "../controllers/authController";
+import { verifyToken } from "../middlewares/authMiddleware"; 
+
 
 
 const router = Router();
@@ -24,6 +29,9 @@ router.post(
   resetPassword as unknown as express.RequestHandler
 );
 router.post("/refresh", refreshAccessToken as unknown as express.RequestHandler);
+router.post("/create-profile", verifyToken, createProfile as unknown as express.RequestHandler);
+router.post("/switch-profile", verifyToken, switchProfile as unknown as express.RequestHandler);
+router.get("/profiles", verifyToken, getProfiles as unknown as express.RequestHandler);  
 
 
 export default router;
