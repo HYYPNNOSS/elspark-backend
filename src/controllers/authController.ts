@@ -10,7 +10,7 @@ const JWT_SECRET = process.env.JWT_SECRET as string;
 const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID!;
 const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID!;
 const EMAILJS_USER_ID = process.env.EMAILJS_USER_ID!;
-const FRONTEND_URL = "localhost:3000";
+const FRONTEND_URL = "elspark.online";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY = "7d";
@@ -57,7 +57,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     },
   });
 
-  const resetLink = `http:${FRONTEND_URL}/reset-password/${token}`;
+  const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
 
   // Use Nodemailer to send the email
   const transporter = nodemailer.createTransport({
