@@ -40,7 +40,7 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
   return token;
 };
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend("re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV");
 
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
