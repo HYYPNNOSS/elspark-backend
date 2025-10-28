@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { send } from "emailjs-com";
 import { PrismaClient } from "@prisma/client";
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET as string;
@@ -39,19 +40,18 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
   return token;
 };
 
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
-  console.log("got it");
 
   if (!email) return res.status(400).json({ error: "Email is required" });
 
   const user = await prisma.account.findUnique({ where: { email } });
   if (!user) return res.status(404).json({ error: "User not found" });
-  console.log("got it 2");
-
 
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "15m" });
-  console.log("got it 3");
+  
   await prisma.passwordResetToken.create({
     data: {
       token,
@@ -59,49 +59,28 @@ export const forgotPassword = async (req: Request, res: Response) => {
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
     },
   });
-  console.log("got it 4");
+
   const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
-  console.log("got it 5");
-  console.log(process.env.EMAIL_USERNAME);
-  console.log(process.env.EMAIL_PASSWORD);
-  // Use Nodemailer to send the email
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USERNAME, // your Gmail or SMTP username
-      pass: process.env.EMAIL_PASSWORD, // your app password or SMTP password
-    },
-    tls: {
-      rejectUnauthorized: true
-    }
-  });
-  console.log("got it 6");
-  const mailOptions = {
-    from: process.env.EMAIL_USERNAME,
-    to: email,
-    subject: "Reset your password",
-    html: `
-      <p>Hello dear elspark user,</p>
-      <p>You requested to reset your password. Click the link below:</p>
-      <a href="${resetLink}">${resetLink}</a>
-      <p>This link will expire in 15 minutes.</p>
-    `,
-  };
-  console.log("got it 7");  
+
   try {
-    await transporter.sendMail(mailOptions);
-    console.log("got it 8");
+    await resend.emails.send({
+      from: 'Elspark <elcode.creator@gmail.com>', 
+      to: email,
+      subject: 'Reset your password',
+      html: `
+        <p>Hello dear elspark user,</p>
+        <p>You requested to reset your password. Click the link below:</p>
+        <a href="${resetLink}">${resetLink}</a>
+        <p>This link will expire in 15 minutes.</p>
+      `,
+    });
+
     return res.json({ message: "Reset link sent to your email." });
   } catch (err) {
     console.error(err);
-    console.log("got it 9");
     return res.status(500).json({ error: "Failed to send email" });
   }
 };
-
 export const resetPassword = async (req: Request, res: Response) => {
   const { token } = req.params;
   const { password } = req.body;
