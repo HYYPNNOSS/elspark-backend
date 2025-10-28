@@ -51,9 +51,10 @@ const server = http.createServer(app);
 
 const allowedOrigins = [
   "https://elspark-frontend.vercel.app",
-  "https://elspark.online",
+  'https://elspark.online',
+  'http://elspark.online', 
+  'https://www.elspark.online', 
   "https://localhost:3000",
-  "https://www.elspark.online",
   "*",
   "http://192.168.1.4:3000",
   "http://192.168.1.5:3000",

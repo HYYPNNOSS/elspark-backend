@@ -62,13 +62,21 @@ export const forgotPassword = async (req: Request, res: Response) => {
   console.log("got it 4");
   const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
   console.log("got it 5");
+  console.log(process.env.EMAIL_USERNAME);
+  console.log(process.env.EMAIL_PASSWORD);
   // Use Nodemailer to send the email
   const transporter = nodemailer.createTransport({
-    service: "gmail", // or use any SMTP provider
+    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
     auth: {
       user: process.env.EMAIL_USERNAME, // your Gmail or SMTP username
       pass: process.env.EMAIL_PASSWORD, // your app password or SMTP password
     },
+    tls: {
+      rejectUnauthorized: true
+    }
   });
   console.log("got it 6");
   const mailOptions = {
