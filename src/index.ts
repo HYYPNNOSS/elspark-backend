@@ -54,7 +54,7 @@ const allowedOrigins = [
   'https://elspark.online',
   'http://elspark.online', 
   'https://www.elspark.online', 
-  "https://localhost:3000",
+  "http://localhost:3000",
   "*",
   "http://192.168.1.4:3000",
   "http://192.168.1.5:3000",
