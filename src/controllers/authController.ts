@@ -41,14 +41,17 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
 
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
+  console.log("got it");
 
   if (!email) return res.status(400).json({ error: "Email is required" });
 
   const user = await prisma.account.findUnique({ where: { email } });
   if (!user) return res.status(404).json({ error: "User not found" });
+  console.log("got it 2");
+
 
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "15m" });
-
+  console.log("got it 3");
   await prisma.passwordResetToken.create({
     data: {
       token,
@@ -56,9 +59,9 @@ export const forgotPassword = async (req: Request, res: Response) => {
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
     },
   });
-
+  console.log("got it 4");
   const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
-
+  console.log("got it 5");
   // Use Nodemailer to send the email
   const transporter = nodemailer.createTransport({
     service: "gmail", // or use any SMTP provider
@@ -67,7 +70,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       pass: process.env.EMAIL_PASSWORD, // your app password or SMTP password
     },
   });
-
+  console.log("got it 6");
   const mailOptions = {
     from: process.env.EMAIL_USERNAME,
     to: email,
@@ -79,12 +82,14 @@ export const forgotPassword = async (req: Request, res: Response) => {
       <p>This link will expire in 15 minutes.</p>
     `,
   };
-
+  console.log("got it 7");  
   try {
     await transporter.sendMail(mailOptions);
+    console.log("got it 8");
     return res.json({ message: "Reset link sent to your email." });
   } catch (err) {
     console.error(err);
+    console.log("got it 9");
     return res.status(500).json({ error: "Failed to send email" });
   }
 };
