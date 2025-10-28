@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import express from "express";
 import http from "http";
 import cors from "cors";
@@ -51,7 +52,7 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "https://elspark-frontend.vercel.app",
   "https://elspark.online",
-  "http://localhost:3000",
+  "https://elspark-backend-11.onrender.com",
   "https://www.elspark.online",
   "*",
   "http://192.168.1.4:3000",
