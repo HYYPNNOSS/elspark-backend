@@ -7,7 +7,8 @@ export const verifyToken = (req: any, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
-    return res.status(401).json({ error: "No token provided" });
+    res.status(401).json({ error: "No token provided" });
+    return
   }
 
   try {
@@ -26,7 +27,8 @@ export const verifyToken = (req: any, res: Response, next: NextFunction) => {
     
     next();
   } catch (err) {
-    return res.status(401).json({ error: "Invalid or expired token" });
+    res.status(401).json({ error: "Invalid or expired token" });
+    return
   }
 };
 
