@@ -66,31 +66,33 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
         });
   
         if (post && post.authorId !== userId) {
-          // REPLACE the prisma.notification.create with createNotification
           await createNotification(
             'comment',
             `${commenter?.username} commented on your post`,
-            post.authorId, // Notify the post author
-            postId.toString(),
-            comment.id.toString(),
-            `/profile/post/${postId}` // Route to the post
+            post.authorId,
+            postId.toString(), // ✅ Convert to string
+            comment.id.toString(), // ✅ Convert to string
+            `/profile/post/${postId}`
           );
         }
       } else if (parentId) {
         // Reply to a comment → notify parent comment author
         const parentComment = await prisma.comment.findUnique({
           where: { id: parentId },
-          select: { authorId: true }
+          select: { authorId: true, postId: true } // ✅ Also get postId from parent
         });
   
         if (parentComment && parentComment.authorId !== userId) {
+          // ✅ Use parentComment.postId instead of the potentially null postId parameter
+          const actualPostId = parentComment.postId || postId;
+          
           await createNotification(
             'reply',
             `${commenter?.username} replied to your comment`,
             parentComment.authorId, 
-            postId?.toString(),
+            actualPostId ? actualPostId.toString() : undefined, // ✅ Safe conversion
             comment.id.toString(),
-            `/profile/post/${postId}` // Route to the post
+            actualPostId ? `/profile/post/${actualPostId}` : undefined
           );
         }
       }
@@ -153,4 +155,3 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
       res.status(500).json({ error: 'Failed to fetch comments' });
     }
   };
-  

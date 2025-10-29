@@ -315,7 +315,7 @@ model Comment {
 model Notification {
   id        String   @id @default(cuid())
   type      String   
-  message   String
+  message   String   @db.Text
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   profileId Int      
   postId    String?
