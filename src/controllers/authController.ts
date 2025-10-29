@@ -11,7 +11,19 @@ const JWT_SECRET = process.env.JWT_SECRET as string;
 const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID!;
 const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID!;
 const EMAILJS_USER_ID = process.env.EMAILJS_USER_ID!;
-const FRONTEND_URL = "elspark.online";
+// const FRONTEND_URL = "elspark.online";
+
+const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV';
+const FRONTEND_URL = process.env.FRONTEND_URL || "elspark.online";
+const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
+
+// Initialize Resend with API key
+const resend = new Resend(RESEND_API_KEY);
+
+// Warn if using default key
+if (!process.env.RESEND_API_KEY) {
+  console.warn('⚠️ Using default RESEND_API_KEY. Set RESEND_API_KEY in environment variables for production.');
+}
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY = "7d";
@@ -43,34 +55,35 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
 // const resend = new Resend("re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV");
 // const RESEND_API_KEY = "re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV"
 // const RESEND_API_KEY = process.env.RESEND_API_KEY as string;
-const resend = new Resend('re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV');
+// const resend = new Resend('re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV');
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  console.log('=== FORGOT PASSWORD CALLED ===');
-  console.log('Request body:', req.body);
+  // Use console.error for important logs in production (higher priority)
+  console.error('[FORGOT PASSWORD] Request received');
+  console.error('[FORGOT PASSWORD] Body:', JSON.stringify(req.body));
   
   const { email } = req.body;
 
   if (!email) {
-    console.log('❌ No email provided');
+    console.error('[FORGOT PASSWORD] No email provided');
     return res.status(400).json({ error: "Email is required" });
   }
 
-  console.log('✓ Email received:', email);
+  console.error('[FORGOT PASSWORD] Email:', email);
 
   try {
     const user = await prisma.account.findUnique({ where: { email } });
-    console.log('User found:', user ? 'YES' : 'NO');
+    console.error('[FORGOT PASSWORD] User found:', !!user);
     
     if (!user) {
-      console.log('❌ User not found in database');
+      console.error('[FORGOT PASSWORD] User not found in database');
       return res.status(404).json({ error: "User not found" });
     }
 
-    console.log('✓ User ID:', user.id);
+    console.error('[FORGOT PASSWORD] User ID:', user.id);
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "15m" });
-    console.log('✓ JWT token generated');
+    console.error('[FORGOT PASSWORD] JWT token generated');
     
     await prisma.passwordResetToken.create({
       data: {
@@ -79,19 +92,16 @@ export const forgotPassword = async (req: Request, res: Response) => {
         expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       },
     });
-    console.log('✓ Reset token saved to DB');
+    console.error('[FORGOT PASSWORD] Reset token saved to DB');
 
     const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
-    console.log('✓ Reset link:', resetLink);
+    console.error('[FORGOT PASSWORD] Reset link generated');
 
-    // Check if API key is set
-    console.log('RESEND_API_KEY:', process.env.RESEND_API_KEY ? 'SET' : 'NOT SET');
-    console.log('API Key starts with:', process.env.RESEND_API_KEY?.substring(0, 10));
-
-    console.log('Attempting to send email via Resend...');
+    console.error('[FORGOT PASSWORD] API Key configured:', RESEND_API_KEY.substring(0, 10) + '...');
+    console.error('[FORGOT PASSWORD] Attempting to send email...');
     
-    const data = await resend.emails.send({
-      from: 'onboarding@resend.dev', // Use Resend's test domain
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
       to: email,
       subject: 'Reset your password - Elspark',
       html: `
@@ -112,21 +122,29 @@ export const forgotPassword = async (req: Request, res: Response) => {
       `,
     });
 
-    console.log('✓✓✓ RESEND RESPONSE ✓✓✓');
-    console.log('Response data:', JSON.stringify(data, null, 2));
-    // console.log('Email ID:', data.id);
+    if (error) {
+      console.error('[FORGOT PASSWORD] ❌ Email sending failed');
+      console.error('[FORGOT PASSWORD] Error:', JSON.stringify(error, null, 2));
+      return res.status(500).json({ 
+        error: "Failed to send email",
+        details: error.message 
+      });
+    }
+
+    console.error('[FORGOT PASSWORD] ✅ Email sent successfully');
+    console.error('[FORGOT PASSWORD] Email ID:', data?.id);
+    console.error('[FORGOT PASSWORD] Response:', JSON.stringify(data, null, 2));
 
     return res.json({ 
       message: "Reset link sent to your email.",
-      
+      emailId: data?.id // Include this for debugging
     });
     
   } catch (err: any) {
-    console.error('❌❌❌ ERROR OCCURRED ❌❌❌');
-    console.error('Error name:', err.name);
-    console.error('Error message:', err.message);
-    console.error('Error statusCode:', err.statusCode);
-    console.error('Full error:', JSON.stringify(err, null, 2));
+    console.error('[FORGOT PASSWORD] ❌ ERROR:', err.name);
+    console.error('[FORGOT PASSWORD] Message:', err.message);
+    console.error('[FORGOT PASSWORD] Status:', err.statusCode);
+    console.error('[FORGOT PASSWORD] Full error:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
     
     return res.status(500).json({ 
       error: "Failed to send email",
