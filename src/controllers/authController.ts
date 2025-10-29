@@ -40,47 +40,103 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
   return token;
 };
 
-const resend = new Resend("re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV");
+// const resend = new Resend("re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV");
+// const RESEND_API_KEY = "re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV"
+// const RESEND_API_KEY = process.env.RESEND_API_KEY as string;
+const resend = new Resend('re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV');
 
 export const forgotPassword = async (req: Request, res: Response) => {
+  console.log('=== FORGOT PASSWORD CALLED ===');
+  console.log('Request body:', req.body);
+  
   const { email } = req.body;
 
-  if (!email) return res.status(400).json({ error: "Email is required" });
+  if (!email) {
+    console.log('❌ No email provided');
+    return res.status(400).json({ error: "Email is required" });
+  }
 
-  const user = await prisma.account.findUnique({ where: { email } });
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "15m" });
-  
-  await prisma.passwordResetToken.create({
-    data: {
-      token,
-      accountId: user.id,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-    },
-  });
-
-  const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
+  console.log('✓ Email received:', email);
 
   try {
-    await resend.emails.send({
-      from: 'Elspark <elcode.creator@gmail.com>', 
+    const user = await prisma.account.findUnique({ where: { email } });
+    console.log('User found:', user ? 'YES' : 'NO');
+    
+    if (!user) {
+      console.log('❌ User not found in database');
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    console.log('✓ User ID:', user.id);
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "15m" });
+    console.log('✓ JWT token generated');
+    
+    await prisma.passwordResetToken.create({
+      data: {
+        token,
+        accountId: user.id,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+    console.log('✓ Reset token saved to DB');
+
+    const resetLink = `https://${FRONTEND_URL}/reset-password/${token}`;
+    console.log('✓ Reset link:', resetLink);
+
+    // Check if API key is set
+    console.log('RESEND_API_KEY:', process.env.RESEND_API_KEY ? 'SET' : 'NOT SET');
+    console.log('API Key starts with:', process.env.RESEND_API_KEY?.substring(0, 10));
+
+    console.log('Attempting to send email via Resend...');
+    
+    const data = await resend.emails.send({
+      from: 'onboarding@resend.dev', // Use Resend's test domain
       to: email,
-      subject: 'Reset your password',
+      subject: 'Reset your password - Elspark',
       html: `
-        <p>Hello dear elspark user,</p>
-        <p>You requested to reset your password. Click the link below:</p>
-        <a href="${resetLink}">${resetLink}</a>
-        <p>This link will expire in 15 minutes.</p>
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>Password Reset Request</h2>
+          <p>Hello dear Elspark user,</p>
+          <p>You requested to reset your password. Click the button below:</p>
+          <div style="margin: 30px 0;">
+            <a href="${resetLink}" 
+               style="background-color: #4F46E5; color: white; padding: 12px 24px; 
+                      text-decoration: none; border-radius: 6px; display: inline-block;">
+              Reset Password
+            </a>
+          </div>
+          <p>Or copy this link: <a href="${resetLink}">${resetLink}</a></p>
+          <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
+        </div>
       `,
     });
 
-    return res.json({ message: "Reset link sent to your email." });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Failed to send email" });
+    console.log('✓✓✓ RESEND RESPONSE ✓✓✓');
+    console.log('Response data:', JSON.stringify(data, null, 2));
+    // console.log('Email ID:', data.id);
+
+    return res.json({ 
+      message: "Reset link sent to your email.",
+      
+    });
+    
+  } catch (err: any) {
+    console.error('❌❌❌ ERROR OCCURRED ❌❌❌');
+    console.error('Error name:', err.name);
+    console.error('Error message:', err.message);
+    console.error('Error statusCode:', err.statusCode);
+    console.error('Full error:', JSON.stringify(err, null, 2));
+    
+    return res.status(500).json({ 
+      error: "Failed to send email",
+      details: err.message,
+      statusCode: err.statusCode 
+    });
   }
 };
+
+
 export const resetPassword = async (req: Request, res: Response) => {
   const { token } = req.params;
   const { password } = req.body;
