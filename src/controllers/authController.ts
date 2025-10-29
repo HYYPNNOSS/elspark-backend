@@ -15,7 +15,7 @@ const EMAILJS_USER_ID = process.env.EMAILJS_USER_ID!;
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV';
 const FRONTEND_URL = process.env.FRONTEND_URL || "elspark.online";
-const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
+const FROM_EMAIL = "noreply@elspark.online";
 
 // Initialize Resend with API key
 const resend = new Resend(RESEND_API_KEY);
