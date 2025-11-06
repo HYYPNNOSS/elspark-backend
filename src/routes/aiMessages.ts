@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { aiMiddleware } from '../middlewares/aiMiddleware'; 
+import { verifyToken } from '../middlewares/authMiddleware'; 
 
 
 const router = express.Router();
@@ -13,10 +13,8 @@ interface AuthRequest extends Request {
   };
 }
 
-
-
 // GET /api/ai-messages/:sessionId - Get messages for a session
-router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) => {
+router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user!.userId;
@@ -59,5 +57,7 @@ router.get('/:sessionId', aiMiddleware, async (req: AuthRequest, res: Response) 
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 export default router;

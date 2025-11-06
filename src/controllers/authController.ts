@@ -25,7 +25,7 @@ if (!process.env.RESEND_API_KEY) {
   console.warn('⚠️ Using default RESEND_API_KEY. Set RESEND_API_KEY in environment variables for production.');
 }
 
-const ACCESS_TOKEN_EXPIRY = "15m";
+const ACCESS_TOKEN_EXPIRY = "14d";
 const REFRESH_TOKEN_EXPIRY = "7d";
 const MAX_PROFILES = 5;
 

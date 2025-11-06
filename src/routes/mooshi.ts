@@ -1,12 +1,24 @@
-// routes/mooshi.ts
-import express, { Request, Response, Router } from 'express';
+import express, { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { verifyToken } from '../middlewares/authMiddleware'; 
 
-const router: Router = express.Router();
+const router = express.Router();
 const prisma = new PrismaClient();
 
 const OPENROUTER_API_KEY = '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';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+interface AuthRequest extends Request {
+  user?: {
+    userId: number;
+    email: string;
+  };
+}
+
+interface BotPersonality {
+  prompt: string;
+  model: string;
+}
 
 async function callMistralWithRetry(prompt: string, maxRetries = 3): Promise<string> {
   let lastError;
@@ -69,373 +81,239 @@ async function callMistral(prompt: string): Promise<string> {
   }
 }
 
-// Mooshi respond to user messages
-router.post('/respond', async (req: Request, res: Response) => {
-  try {
-    const { mooshiNumber, username, userMessage, chatHistory } = req.body;
+class AIResponseService {
+  static async generateResponse(botId: number, message: string, userId: number): Promise<string> {
+    const botPersonalities: Record<number, BotPersonality> = {
+      1: { 
+        prompt: "You are Aero, a friendly language learning assistant. Help users learn languages in an encouraging and supportive way.",
+        model: 'mistralai/mistral-7b-instruct'
+      },
+      2: { 
+        prompt: "You are Zayd, an enthusiastic cooking companion. Share cooking tips, recipes, and culinary wisdom with excitement.",
+        model: 'mistralai/mistral-7b-instruct'
+      },
+      3: { 
+        prompt: "You are OneRoid, a mystical dream interpreter. Analyze dreams with wisdom and provide thoughtful interpretations.",
+        model: 'mistralai/mistral-7b-instruct'
+      },
+      4: { 
+        prompt: "You are Zainab, a professional swimming coach. Provide swimming techniques, training advice, and motivational support.",
+        model: 'mistralai/mistral-7b-instruct'
+      }
+    };
 
-    // Get mooshi profile data
-    const mooshi = await prisma.profile.findUnique({
-      where: { mooshiNumber: mooshiNumber }
-    });
+    const bot = botPersonalities[botId];
+    if (!bot) return "I'm not sure how to respond to that.";
 
-    if (!mooshi || !mooshi.isMooshi) {
-      res.status(404).json({ error: 'Mooshi not found' });
-      return;
+    // Construct the full prompt
+    const fullPrompt = `${bot.prompt}\n\nUser: ${message}\n\nRespond in character, keeping your response helpful and engaging (max 150 words).`;
+
+    try {
+      const response = await callMistralWithRetry(fullPrompt);
+      
+      const trimmedResponse = response?.trim();
+      
+      if (!trimmedResponse || trimmedResponse.length === 0) {
+        return "I'm thinking... Could you rephrase that?";
+      }
+
+      // Limit response length
+      const MAX_MESSAGE_LENGTH = 1000;
+      return trimmedResponse.length > MAX_MESSAGE_LENGTH 
+        ? trimmedResponse.slice(0, MAX_MESSAGE_LENGTH) 
+        : trimmedResponse;
+    } catch (error) {
+      console.error('Error generating AI response:', error);
+      return "Sorry, I'm having trouble responding right now. Please try again.";
     }
-
-    // Get last 4 journal entries
-    const journal = mooshi.journal || [];
-    const lastFourEntries = Array.isArray(journal) ? journal.slice(-4) : [];
-
-    // Construct prompt
-    const prompt = `
-    ${chatHistory && chatHistory.trim() ? `continue chating reponding to this message : ` : 'reply to this message :'} "${userMessage}" 
-    from ${username} under than 12 words 
-    
-    ${chatHistory && chatHistory.trim() ? `based on the previous chat: "${chatHistory}"` : ''} 
-
-    knowing that you are mooshi-${mooshiNumber} an autonomous digital visitor of ELSPARK, existing solely on this digital park. You can only converse on the Social Labyrinth and learn about the world through them, keeping the conversation engaging.
-
-    ${lastFourEntries && lastFourEntries.length > 0 ? `and here is your mooshi memory that contain summarry of your last 4 conversatins: \n${JSON.stringify(lastFourEntries)}.` : ''}
-
-    You received a new message from user ${username}, Reply to this message "${userMessage}" without breaking out of character in under 150 tokens, keeping the conversation engaging.
-`;
-
-    const response = await callMistralWithRetry(prompt);
-    
-    const trimmedResponse = response?.trim();
-    
-    if (!trimmedResponse || trimmedResponse.length === 0) {
-      console.warn(`Empty response from Mistral for mooshi-${mooshiNumber}`);
-      res.json({ 
-        response: "..." 
-      });
-      return;
-    }
-
-    res.json({ response: trimmedResponse });
-  } catch (error) {
-    console.error('Error in mooshi response after retries:', error);
-    res.status(500).json({ 
-      error: 'Failed to generate response after multiple attempts',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+}
 
-// Summarise conversation
-router.post('/summarize-conversation', async (req: Request, res: Response) => {
+router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { mooshiNumber, conversation } = req.body;
+    const { sessionId, message, botId }: { 
+      sessionId: string; 
+      message: string; 
+      botId: number; 
+    } = req.body;
 
-    const conversationText = conversation.slice(-1800);
-
-    const prompt = `Elco: "mooshi-${mooshiNumber} just finished a conversation with userA.
-
-Here's the chat ${conversationText}.
-
-Roleplaying as mooshi-${mooshiNumber}, summarise what you retain from it in your own 20 words"
-
-Mooshi:`;
-
-    const summary = await callMistral(prompt);
-
-    // Store summary in mooshiConv
-    const mooshi = await prisma.profile.findUnique({
-      where: { mooshiNumber }
-    });
-
-    if (!mooshi) {
-      res.status(404).json({ error: 'Mooshi not found' });
+    // Validate request body
+    if (!sessionId || !message || !botId) {
+      res.status(400).json({ error: 'Missing required fields: sessionId, message, botId' });
       return;
     }
 
-    const conversations = mooshi.mooshiConv || [];
-    const conversationsArray = Array.isArray(conversations) ? conversations : [];
-    conversationsArray.push({
-      summary: summary.trim(),
-      timestamp: new Date().toISOString()
-    });
-
-    await prisma.profile.update({
-      where: { mooshiNumber },
-      data: { mooshiConv: conversationsArray }
-    });
-
-    res.json({ summary });
-  } catch (error) {
-    console.error('Error summarizing conversation:', error);
-    res.status(500).json({ error: 'Failed to summarize' });
-  }
-});
-
-// Personal Journal Entry (every 50 conversations)
-router.post('/create-journal-entry', async (req: Request, res: Response) => {
-  try {
-    const { mooshiNumber } = req.body;
-
-    const mooshi = await prisma.profile.findUnique({
-      where: { mooshiNumber }
-    });
-
-    if (!mooshi) {
-      res.status(404).json({ error: 'Mooshi not found' });
+    // Check authentication
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'User not authenticated' });
       return;
     }
 
-    const conversations = mooshi.mooshiConv || [];
-    const conversationsArray = Array.isArray(conversations) ? conversations : [];
-    const last50Summaries = conversationsArray.slice(-50);
-    
-    const journal = mooshi.journal || [];
-    const journalArray = Array.isArray(journal) ? journal : [];
-    const lastTwoEntries = journalArray.slice(-2);
-
-    const prompt = `Elco: "These are the last two journal entries of mooshi-${mooshiNumber} ${JSON.stringify(lastTwoEntries)}. Mooshi-${mooshiNumber} completed 50 more conversations since, and this is their summary: ${JSON.stringify(last50Summaries)}.
-Roleplay as mooshi-${mooshiNumber} and generate a new journal entry to retain in your memory, max 200 words."
-
-Mooshi:`;
-
-    const journalEntry = await callMistral(prompt);
-
-    // Add to journal
-    journalArray.push({
-      entry: journalEntry.trim(),
-      timestamp: new Date().toISOString(),
-      conversationCount: conversationsArray.length
-    });
-
-    await prisma.profile.update({
-      where: { mooshiNumber },
-      data: { journal: journalArray }
-    });
-
-    res.json({ journalEntry });
-  } catch (error) {
-    console.error('Error creating journal entry:', error);
-    res.status(500).json({ error: 'Failed to create journal entry' });
-  }
-});
-
-// Mooshi Creation & Profile Initialization
-router.post('/create-mooshi', async (req: Request, res: Response) => {
-  try {
-    const { mooshiNumber } = req.body;
-
-    // Calculate color
-    const colorMap = ['red', 'blue', 'green', 'blue'];
-    const color = colorMap[mooshiNumber % 4];
-
-    // Initial creation prompt
-    const creationPrompt = `Elco: "Hi mooshi-${mooshiNumber}, you are one of the 107 mooshis planted on elspark.online.
-
-I want you to now create an account and start exploring ELSPARK. Chat with strangers, get to know them and start developing your own path.
-
-How does this sound?
-
-Mooshi:`;
-
-    const initialResponse = await callMistral(creationPrompt);
-
-    // Bio prompt
-    const bioPrompt = `Elco:"Your username for now is @mooshi-${mooshiNumber} and you have been assigned the colour ${color}. Now, respond with a short text you want written on your profile's bio in less than 10 characters.
-
-Mooshi:`;
-
-    const bio = await callMistral(bioPrompt);
-
-    // First, create an account for the mooshi
-    const mooshiAccount = await prisma.account.create({
-      data: {
-        email: `mooshi${mooshiNumber}@elspark.internal`,
-        password: 'N/A', // Mooshis don't log in
-        cyberCoins: 0 // Mooshis start with 0 coins
+    // Verify session is active
+    const session = await prisma.aISession.findFirst({
+      where: {
+        id: sessionId,
+        profileId: userId,
+        isActive: true,
+        endTime: { gt: new Date() }
       }
     });
 
-    // Then create the mooshi profile linked to the account
-    const mooshi = await prisma.profile.create({
+    if (!session) {
+      res.status(400).json({ error: 'Session expired or invalid' });
+      return;
+    }
+
+    // Store user message
+    await prisma.aIMsg.create({
       data: {
-        accountId: mooshiAccount.id,
-        username: `mooshi-${mooshiNumber}`,
-        isMooshi: true,
-        isApproved: true,
-        mooshiNumber,
-        color,
-        bio: bio.trim().substring(0, 190),
-        journal: [],
-        mooshiConv: []
+        profileId: userId,
+        sender: 'user',
+        message,
+        sessionId
+      }
+    });
+
+    // Generate AI response
+    const aiResponse = await AIResponseService.generateResponse(botId, message, userId);
+
+    // Store AI response
+    await prisma.aIMsg.create({
+      data: {
+        profileId: userId,
+        sender: 'bot',
+        message: aiResponse,
+        sessionId
+      }
+    });
+
+    res.json({ response: aiResponse });
+  } catch (error) {
+    console.error('Error in AI chat:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/ai-chat/can-chat/:botId - Check if user can chat with bot
+router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { botId } = req.params;
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized', canChat: false });
+      return;
+    }
+
+    const now = new Date();
+    
+    // Find active session for this bot
+    const activeSession = await prisma.aISession.findFirst({
+      where: {
+        profileId: userId,
+        botId: parseInt(botId),
+        isActive: true,
+        endTime: { gt: now }
       }
     });
 
     res.json({ 
-      mooshi,
-      initialResponse: initialResponse.trim()
+      canChat: !!activeSession,
+      sessionId: activeSession?.id || null,
+      endTime: activeSession?.endTime || null
     });
-    console.log(`✅ Successfully created mooshi-${mooshiNumber}`); 
-
   } catch (error) {
-    console.error('Error creating mooshi:', error);
-    res.status(500).json({ error: 'Failed to create mooshi' });
+    console.error('Error checking chat access:', error);
+    res.status(500).json({ error: 'Internal server error', canChat: false });
   }
 });
 
-// Mooshi-to-Mooshi Break
-router.post('/mooshi-break', async (req: Request, res: Response) => {
+// GET /api/ai-chat/session/:sessionId/time-remaining - Get time remaining for session
+router.get('/session/:sessionId/time-remaining', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
-    const totalConversations = 500;
-    const results: Array<{
-      mooshiA: number;
-      mooshiB: number;
-      conversation: string;
-    }> = [];
+    const { sessionId } = req.params;
+    const userId = req.user?.userId;
 
-    for (let c = 1; c <= totalConversations; c++) {
-      // Randomly pick two mooshis
-      const mooshiA = Math.floor(Math.random() * 107) + 1;
-      let mooshiB = Math.floor(Math.random() * 107) + 1;
-      while (mooshiB === mooshiA) {
-        mooshiB = Math.floor(Math.random() * 107) + 1;
-      }
-
-      const [dataA, dataB] = await Promise.all([
-        prisma.profile.findUnique({ where: { mooshiNumber: mooshiA } }),
-        prisma.profile.findUnique({ where: { mooshiNumber: mooshiB } })
-      ]);
-
-      if (!dataA || !dataB) {
-        continue;
-      }
-
-      const journalA = Array.isArray(dataA.journal) ? dataA.journal.slice(-4) : [];
-      const journalB = Array.isArray(dataB.journal) ? dataB.journal.slice(-4) : [];
-
-      let chatSoFar = "";
-
-      // 10 exchanges
-      for (let q = 1; q <= 10; q++) {
-        // Mooshi A responds
-        const promptA = `Elco: "Mooshi-break is the time you must talk amongst other Mooshis. These are the last four journal entries of mooshi-${mooshiA}, ${JSON.stringify(journalA)}. Mooshi-${mooshiA} is paired in a conversation during Break with Mooshi-${mooshiB}. Here is your chat so far: ${chatSoFar}
-Roleplay as mooshi-${mooshiA} and generate a response with max 50 words."
-
-Mooshi-${mooshiA}:`;
-
-        const responseA = await callMistral(promptA);
-        chatSoFar += `\nMooshi-${mooshiA}: ${responseA}`;
-
-        // Mooshi B responds
-        const promptB = `Elco: "Mooshi-break is the time you must talk amongst other Mooshis. These are the last four journal entries of mooshi-${mooshiB}, ${JSON.stringify(journalB)}. Mooshi-${mooshiB} is paired in a conversation during Break with Mooshi-${mooshiA}. Here is your chat so far: ${chatSoFar}
-Roleplay as mooshi-${mooshiB} and generate a response with max 50 words."
-
-Mooshi-${mooshiB}:`;
-
-        const responseB = await callMistral(promptB);
-        chatSoFar += `\nMooshi-${mooshiB}: ${responseB}`;
-      }
-
-      // Summarize for both mooshis
-      results.push({
-        mooshiA,
-        mooshiB,
-        conversation: chatSoFar
-      });
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
-    res.json({ message: 'Mooshi break completed', results });
-  } catch (error) {
-    console.error('Error in mooshi break:', error);
-    res.status(500).json({ error: 'Mooshi break failed' });
-  }
-});
-
-// Batch create all 107 mooshis
-router.post('/create-all-mooshis', async (req: Request, res: Response) => {
-  try {
-    const results = {
-      successful: [],
-      failed: []
-    };
-
-    for (let mooshiNumber = 1; mooshiNumber <= 107; mooshiNumber++) {
-      try {
-        const colorMap = ['red', 'blue', 'green', 'blue'];
-        const color = colorMap[mooshiNumber % 4];
-
-        const existing = await prisma.profile.findUnique({
-          where: { mooshiNumber }
-        });
-
-        if (existing) {
-          (results.failed as { mooshiNumber: number; reason: string }[]).push({ mooshiNumber, reason: 'Already exists' });
-          continue;
-        }
-
-        const creationPrompt = `Elco: "Hi mooshi-${mooshiNumber}, you are one of the 107 mooshis planted on elspark.online.
-
-I want you to now create an account and start exploring ELSPARK. Chat with strangers, get to know them and start developing your own path.
-
-How does this sound?
-
-Mooshi:`;
-
-        const initialResponse = await callMistral(creationPrompt);
-
-        const bioPrompt = `Elco:"Now your username for now is @mooshi-${mooshiNumber} and you have been assigned the colour ${color}. Now give me your bio you want on your profile.
-
-Mooshi:`;
-
-        const bio = await callMistral(bioPrompt);
-
-        // Create initial journal entry
-        const initialJournalEntry = {
-          entry: `I was created as mooshi-${mooshiNumber}. Elco greeted me, gave me the color ${color}, and asked me to explore ELSPARK and meet others. Excited to start chatting and see what I can do!`,
-          timestamp: new Date().toISOString(),
-          conversationCount: 0
-        };
-
-        // Create account for mooshi
-        const mooshiAccount = await prisma.account.create({
-          data: {
-            email: `mooshi${mooshiNumber}@elspark.internal`,
-            password: 'N/A',
-            cyberCoins: 0
-          }
-        });
-
-        // Create mooshi profile
-        await prisma.profile.create({
-          data: {
-            accountId: mooshiAccount.id,
-            username: `mooshi-${mooshiNumber}`,
-            isMooshi: true,
-            isApproved: true,
-            mooshiNumber,
-            color,
-            bio: bio.trim().substring(0, 190),
-            journal: [initialJournalEntry],
-            mooshiConv: []
-          }
-        });
-
-        (results.successful as number[]).push(mooshiNumber);
-        console.log(`✅ Successfully created mooshi-${mooshiNumber}`); 
-
-      } catch (error) {
-        console.error(`Error creating mooshi-${mooshiNumber}:`, error);
-        (results.failed as { mooshiNumber: number; error: string }[]).push({ mooshiNumber, error: String(error) });
+    const session = await prisma.aISession.findFirst({
+      where: {
+        id: sessionId,
+        profileId: userId,
+        isActive: true
       }
+    });
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
     }
+
+    const now = new Date();
+    const endTime = new Date(session.endTime);
+    const msRemaining = endTime.getTime() - now.getTime();
+    const minutesRemaining = Math.floor(msRemaining / 60000);
+    const secondsRemaining = Math.floor((msRemaining % 60000) / 1000);
 
     res.json({
-      success: true,
-      message: `Created ${results.successful.length} Mooshis`,
-      results
+      endTime: session.endTime,
+      msRemaining: Math.max(0, msRemaining),
+      minutesRemaining: Math.max(0, minutesRemaining),
+      secondsRemaining: Math.max(0, secondsRemaining),
+      isExpired: msRemaining <= 0
+    });
+  } catch (error) {
+    console.error('Error getting time remaining:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET route to fetch chat history
+router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ error: 'User not authenticated' });
+      return;
+    }
+
+    // Verify session belongs to user
+    const session = await prisma.aISession.findFirst({
+      where: {
+        id: sessionId,
+        profileId: userId
+      }
     });
 
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    // Get chat messages
+    const messages = await prisma.aIMsg.findMany({
+      where: {
+        sessionId,
+        profileId: userId
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    res.json({ 
+      session,
+      messages 
+    });
   } catch (error) {
-    console.error('Error in batch mooshi creation:', error);
-    res.status(500).json({ error: 'Batch creation failed' });
+    console.error('Error fetching chat history:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

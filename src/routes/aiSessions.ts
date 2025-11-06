@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { aiMiddleware } from '../middlewares/aiMiddleware'; 
+import { verifyToken } from '../middlewares/authMiddleware'; 
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -20,7 +20,7 @@ interface BotConfig {
 }
 
 // POST /api/ai-sessions - Create new AI session
-router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { botId, duration, cost }: { botId: number; duration: number; cost: number } = req.body;
     const profileId = req.user?.profileId || req.user?.userId;
@@ -84,7 +84,7 @@ router.post('/', aiMiddleware, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/ai-sessions/active - Get user's active sessions
-router.get('/active', aiMiddleware, async (req: AuthRequest, res: Response) => {
+router.get('/active', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const profileId = req.user?.profileId || req.user?.userId;
     
@@ -127,6 +127,115 @@ router.get('/active', aiMiddleware, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
+router.get('/history/:botId', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { botId } = req.params;
+    const profileId = req.user?.profileId || req.user?.userId;
+    
+    if (!profileId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Get all sessions for this bot and profile
+    const sessions = await prisma.aISession.findMany({
+      where: {
+        profileId: profileId,
+        botId: parseInt(botId)
+      },
+      orderBy: { startTime: 'desc' }
+    });
+
+    res.json({
+      hasHistory: sessions.length > 0,
+      sessions: sessions.map(s => ({
+        id: s.id,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        isActive: s.isActive,
+        duration: s.duration
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching session history:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/ai-sessions/extend - Extend active session
+router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+    const profileId = req.user?.profileId || req.user?.userId;
+    const extensionMinutes = 5;
+    const extensionCost = 1;
+
+    if (!profileId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Get the session
+    const session = await prisma.aISession.findUnique({
+      where: { id: sessionId },
+      include: { profile: { include: { account: true } } }
+    });
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    // Verify session belongs to user
+    if (session.profileId !== profileId) {
+      res.status(403).json({ error: 'Unauthorized to extend this session' });
+      return;
+    }
+
+    // Check if session is still active
+    if (!session.isActive || new Date(session.endTime) <= new Date()) {
+      res.status(400).json({ error: 'Session is no longer active' });
+      return;
+    }
+
+    // Check user has enough coins
+    const userCoins = session.profile.account.cyberCoins ? Number(session.profile.account.cyberCoins) : 0;
+    if (userCoins < extensionCost) {
+      res.status(400).json({ error: 'Insufficient coins' });
+      return;
+    }
+
+    // Extend the session
+    const newEndTime = new Date(session.endTime.getTime() + extensionMinutes * 60 * 1000);
+    const updatedSession = await prisma.aISession.update({
+      where: { id: sessionId },
+      data: { 
+        endTime: newEndTime,
+        duration: session.duration + extensionMinutes
+      }
+    });
+
+    // Deduct coins
+    await prisma.account.update({
+      where: { id: session.profile.accountId },
+      data: { cyberCoins: { decrement: extensionCost } }
+    });
+
+    res.json({ 
+      message: 'Session extended successfully',
+      session: updatedSession 
+    });
+
+  } catch (error) {
+    console.error('Error extending session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 // POST /api/ai-sessions/cleanup - Cleanup expired sessions
 router.post('/cleanup', async (req: Request, res: Response) => {
