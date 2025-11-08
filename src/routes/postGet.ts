@@ -23,6 +23,7 @@ ostrouter.get("/posts/public", async (req, res) => {
           id: true,
           title: true,
           text: true,
+          isAnonymous: true,
           imageUrl: true,
           videoUrl: true,
           createdAt: true,

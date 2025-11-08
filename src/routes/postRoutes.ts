@@ -220,6 +220,102 @@ postRouter.get(
   }
 );
 
+
+// Add to postRouter.ts
+
+postRouter.delete(
+  "/:id",
+  verifyToken,
+  async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    const user = (req as any).user;
+    const postId = parseInt(id);
+
+    if (!postId || isNaN(postId)) {
+      res.status(400).json({ error: "Invalid post ID" });
+      return;
+    }
+
+    try {
+      // Find the post and check ownership - INCLUDE AUTHOR
+      const post = await prisma.post.findUnique({
+        where: { id: postId },
+        include: {
+          author: {
+            select: {
+              id: true,
+              username: true,
+              profilePicture: true,
+            },
+          },
+          coowners: true,
+        },
+      });
+
+      if (!post) {
+        res.status(404).json({ error: "Post not found" });
+        return;
+      }
+
+      // Check if user is owner or coowner
+      const isOwner = post.authorId === user.id;
+      const isCoowner = post.coowners.some(co => co.userId === user.id);
+
+      if (!isOwner && !isCoowner) {
+        res.status(403).json({ error: "Unauthorized to delete this post" });
+        return;
+      }
+
+      // If user is a coowner, just remove them from coowners
+      if (isCoowner && !isOwner) {
+        await prisma.postCoowner.delete({
+          where: {
+            postId_userId: {
+              postId: postId,
+              userId: user.id,
+            },
+          },
+        });
+
+        res.status(200).json({ 
+          message: "Removed from coowners successfully",
+          isAnonymized: false 
+        });
+        return;
+      }
+
+      // If user is the original author, anonymize the post
+      if (isOwner) {
+        // Remove all coowners
+        await prisma.postCoowner.deleteMany({
+          where: { postId: postId },
+        });
+
+        // Update post to be anonymous
+        const updatedPost = await prisma.post.update({
+          where: { id: postId },
+          data: {
+            isAnonymous: true,
+            originalAuthorId: post.authorId,
+            deletedAt: new Date(),
+          },
+        });
+
+        res.status(200).json({ 
+          message: "Post anonymized successfully",
+          isAnonymized: true,
+          post: updatedPost 
+        });
+        return;
+      }
+
+    } catch (error) {
+      console.error("Failed to delete/anonymize post:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
 // Alternative version that gets ALL comments in a flat structure (if you prefer)
 postRouter.get(
   "/:id/with-flat-comments",

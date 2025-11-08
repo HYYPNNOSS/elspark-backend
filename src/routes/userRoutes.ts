@@ -103,6 +103,7 @@ router.get("/public_post", async (req, res) => {
         text: true,
         imageUrl: true,
         videoUrl: true,
+        isAnonymous: true,
         createdAt: true,
         updatedAt: true,
         author: {
@@ -153,6 +154,8 @@ router.get("/id/:id", async (req: Request, res: Response) => {
             title: true,
             text: true,
             imageUrl: true,
+            videoUrl: true,
+            isAnonymous: true,
             isPrivate: true,
             createdAt: true,
             updatedAt: true,
@@ -220,6 +223,8 @@ router.get("/:username", async (req: Request, res: Response) => {
             id: true,
             text: true,
             imageUrl: true,
+            videoUrl: true,
+            isAnonymous: true,
             isPrivate: true,
             createdAt: true,
             updatedAt: true,
@@ -479,6 +484,7 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
             imageUrl: true,
             videoUrl: true,
             isPrivate: true,
+            isAnonymous: true,
             createdAt: true,
             updatedAt: true,
             author: {

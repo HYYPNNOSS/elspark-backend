@@ -246,6 +246,10 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  isAnonymous   Boolean  @default(false)
+  originalAuthorId Int?
+  deletedAt     DateTime?
+
   authorId Int
   author   Profile @relation("PostAuthors", fields: [authorId], references: [id], onDelete: Cascade)
 
