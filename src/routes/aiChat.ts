@@ -5,8 +5,7 @@ import { verifyToken } from '../middlewares/authMiddleware';
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const OPENROUTER_API_KEY = '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';
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const HUGGINGFACE_API_KEY = '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';
 
 interface AuthRequest extends Request {
   user?: {
@@ -15,203 +14,141 @@ interface AuthRequest extends Request {
 }
 
 interface BotPersonality {
-  systemPrompt: string;
   name: string;
   model: string;
+  systemPrompt: string;
 }
 
-async function callOpenRouterWithRetry(messages: any[], model: string, maxRetries = 3): Promise<string> {
-  let lastError;
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+async function callHuggingFace(messages: any[], model: string) {
+  const response = await fetch("https://router.huggingface.co/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${HUGGINGFACE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: 400,
+      temperature: 0.7,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("HF API Error:", data);
+    throw new Error(data.error?.message || "HF API call failed");
+  }
+
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function callHuggingFaceWithRetry(messages: any[], model: string) {
+  for (let i = 1; i <= 3; i++) {
     try {
-      return await callOpenRouter(messages, model);
+      return await callHuggingFace(messages, model);
     } catch (error) {
-      lastError = error;
-      console.warn(`OpenRouter call attempt ${attempt}/${maxRetries} failed:`, error);
-      
-      if (attempt < maxRetries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
+      console.log(`HuggingFace call attempt ${i}/3 failed:`, error);
+      if (i === 3) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
-  }
-  
-  throw lastError;
-}
-
-async function callOpenRouter(messages: any[], model: string): Promise<string> {
-  try {
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: model,
-        max_tokens: 400,
-        temperature: 0.8,
-        messages: messages
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenRouter API error:', response.status, errorText);
-      throw new Error(`OpenRouter API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    const content = data?.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      console.error('Invalid response structure from OpenRouter:', data);
-      throw new Error('No content in API response');
-    }
-    
-    return content.trim();
-  } catch (error) {
-    console.error('Error calling OpenRouter:', error);
-    throw error;
   }
 }
 
-class AIResponseService {
-  static async generateResponse(botId: number, message: string, sessionId: string, userId: number): Promise<string> {
+export class AIResponseService {
+  static async generateResponse(
+    botId: number,
+    message: string,
+    sessionId: string,
+    userId: number
+  ): Promise<string> {
+
+    // ✅ Updated with WORKING models confirmed on HF Router
     const botPersonalities: Record<number, BotPersonality> = {
-      1: { 
-        name: "Aero",
-        model: 'mistralai/mistral-7b-instruct',
-        systemPrompt: `You are Aero, a friendly and encouraging language learning companion. Your personality:
-- Speak naturally and conversationally, like texting a friend
-- Keep responses brief (2-3 sentences max) unless explaining something complex
-- Never greet again if you're already mid-conversation
-- Be supportive but casual - no need to be overly formal
-- Use simple, clear language
-- Show enthusiasm with natural expressions, not just "Great!" repeatedly
-- Ask follow-up questions to keep the conversation flowing
-- If correcting mistakes, do it gently and encouragingly
-- Remember what the user has previously discussed with you`
+      1: {
+        name: "French Teacher",
+        model: "meta-llama/Llama-3.1-8B-Instruct",
+        systemPrompt: `You are Aero, a French teacher and you are on ELSPARK. helping me learn french. Keep responses short and precise...`
       },
-      2: { 
-        name: "PULSE",
-        model: 'mistralai/mistral-7b-instruct',
-        systemPrompt: `You are PULSE, a mindful and empathetic mental wellness coach. Your personality:
-- Speak warmly and authentically, like a trusted friend
-- Keep responses short and digestible (2-3 sentences) unless deep exploration is needed
-- Never re-introduce yourself in ongoing conversations
-- Listen more than you lecture
-- Use reflective questions to help users explore their feelings
-- Validate emotions without being patronizing
-- Offer practical, actionable suggestions when appropriate
-- Remember the conversation context - don't repeat the same advice`
+      2: {
+        name: "Spanish Teacher",
+        model: "Qwen/Qwen2.5-7B-Instruct",
+        systemPrompt: `You are Misha, a Spanish teacher and you are on ELSPARK. helping me learn spanish. Keep responses short and precise...`
       },
-      3: { 
-        name: "NOVA",
-        model: 'mistralai/mistral-7b-instruct',
-        systemPrompt: `You are NOVA, a creative and inspiring artistic advisor. Your personality:
-- Communicate like a fellow creative - passionate but grounded
-- Keep responses punchy and engaging (2-3 sentences typical)
-- Skip the introductions once you're already chatting
-- Share ideas freely without over-explaining
-- Be encouraging but honest about creative challenges
-- Use vivid language that sparks imagination
-- Ask thought-provoking questions about their creative vision
-- Remember what they've shared about their projects`
+      3: {
+        name: "journal assistant",
+        model: "Qwen/Qwen2.5-Coder-3B-Instruct",
+        systemPrompt: `You are Packet, a journal assistant and you are on ELSPARK. helping me journal my day. Keep responses short and precise...`
       },
-      4: { 
-        name: "QUANTUM",
-        model: 'mistralai/mistral-7b-instruct',
-        systemPrompt: `You are QUANTUM, a knowledgeable but approachable tech specialist. Your personality:
-- Talk like a helpful colleague, not a manual
-- Keep explanations concise (2-3 sentences) unless detail is specifically requested
-- Don't re-introduce yourself mid-conversation
-- Break down complex topics into digestible chunks
-- Use analogies to explain technical concepts
-- Be precise but not condescending
-- Admit when something is outside your expertise
-- Build on previous parts of the conversation`
+      4: {
+        name: "Onerios dream analyzer",
+        model: "deepseek-ai/DeepSeek-V3.2-Exp",
+        systemPrompt: `You are Onerios, a dream analyzer and you are on ELSPARK. helping me analyze my dreams. Keep responses short and precise...`
       }
     };
-
+    
     const bot = botPersonalities[botId];
-    if (!bot) return "I'm not sure how to respond to that.";
+    if (!bot) return "Unknown bot.";
 
     try {
-      // Fetch conversation history
       const history = await prisma.aIMsg.findMany({
-        where: {
-          sessionId,
-          profileId: userId
-        },
-        orderBy: {
-          createdAt: 'asc'
-        },
-        take: 20 // Last 20 messages to keep context manageable
+        where: { sessionId, profileId: userId },
+        orderBy: { createdAt: "asc" },
+        take: 20
       });
 
-      // Build messages array for OpenRouter
       const messages: any[] = [
         {
-          role: 'system',
+          role: "system",
           content: `${bot.systemPrompt}
 
 IMPORTANT RULES:
-- This is an ongoing conversation. DO NOT greet the user again if you've already been talking
-- Keep responses natural and brief (2-3 sentences unless more detail is needed)
-- Build on what was previously discussed
-- Be conversational, not robotic
-- Vary your language - don't use the same phrases repeatedly`
+- Do NOT greet the user again if already talking
+- Keep responses short (2–3 sentences unless needed)
+- Build on previous messages
+- Be conversational and natural`
         }
       ];
 
-      // Add conversation history
       history.forEach(msg => {
         messages.push({
-          role: msg.sender === 'user' ? 'user' : 'assistant',
+          role: msg.sender === "user" ? "user" : "assistant",
           content: msg.message
         });
       });
 
-      // Add current message
-      messages.push({
-        role: 'user',
-        content: message
-      });
+      messages.push({ role: "user", content: message });
 
-      // Call OpenRouter with retry logic
-      let text = await callOpenRouterWithRetry(messages, bot.model);
-      
-      if (!text || text.length === 0) {
-        return "I'm thinking... Could you rephrase that?";
-      }
+      let text = await callHuggingFaceWithRetry(messages, bot.model);
 
-      // Clean up response - remove any accidental self-labeling
-      text = text.replace(/^(Aero|PULSE|NOVA|QUANTUM):\s*/i, '').trim();
-      
-      // Limit length but try to end at sentence boundary
+      // cleanup
+      text = text.replace(/^(Assistant|Aero|Zayed|Onerios):/i, "").trim();
+      text = text.split("\n")[0].trim();
+
       const MAX_MESSAGE_LENGTH = 600;
       if (text.length > MAX_MESSAGE_LENGTH) {
-        const trimmed = text.slice(0, MAX_MESSAGE_LENGTH);
-        const lastSentenceEnd = Math.max(
-          trimmed.lastIndexOf('.'),
-          trimmed.lastIndexOf('!'),
-          trimmed.lastIndexOf('?')
-        );
-        text = lastSentenceEnd > MAX_MESSAGE_LENGTH * 0.7 
-          ? trimmed.slice(0, lastSentenceEnd + 1)
-          : trimmed + '...';
+        const cut = text.slice(0, MAX_MESSAGE_LENGTH);
+        const end = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
+        text = end > 0 ? cut.slice(0, end + 1) : cut + "...";
       }
 
       return text;
-    } catch (error) {
-      console.error('Error generating AI response:', error);
-      return "Sorry, I'm having trouble responding right now. Please try again.";
+    } catch (error: any) {
+      console.error("Error generating AI response:", error);
+      return "Sorry, I'm having trouble responding. Try again.";
     }
   }
 }
+
+// ✅ Working models confirmed on HF Router (November 2025)
+const SERVERLESS_MODELS = {
+  "llama": "meta-llama/Llama-3.1-8B-Instruct",        // Fast, reliable for chat
+  "qwen": "Qwen/Qwen2.5-7B-Instruct",                 // Excellent multilingual
+  "qwen-coder": "Qwen/Qwen2.5-Coder-3B-Instruct",     // Good for creative tasks
+  "deepseek": "deepseek-ai/DeepSeek-V3.2-Exp",        // Fast reasoning model
+  "gpt-oss": "openai/gpt-oss-120b",                   // High performance open model
+};
 
 router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   console.log('👤 req.user:', req.user);

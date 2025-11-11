@@ -9,6 +9,8 @@ const prisma = new PrismaClient();
 interface AuthRequest extends Request {
   user?: {
     userId: number;
+    profileId: number;
+    accountId: number;
     email: string;
   };
 }
@@ -17,7 +19,12 @@ interface AuthRequest extends Request {
 router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
-    const userId = req.user!.userId;
+    const userId = req.user?.profileId || req.user?.userId;
+
+if (!userId) {
+  res.status(401).json({ error: 'Unauthorized' });
+  return;
+}
 
     // Verify session belongs to user
     const session = await prisma.aISession.findFirst({
@@ -42,13 +49,14 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
     });
 
     // Format messages for chat interface
-    const formattedMessages = messages.map(msg => ({
-      id: msg.id,
-      content: msg.message,
-      senderId: msg.sender === 'user' ? userId : session.botId,
-      receiverId: msg.sender === 'user' ? session.botId : userId,
-      createdAt: msg.createdAt.toISOString()
-    }));
+    // Format messages for chat interface
+const formattedMessages = messages.map(msg => ({
+  id: msg.id,
+  content: msg.message,
+  senderId: msg.sender === 'user' ? userId : `bot-${session.botId}`, // Use string for bot
+  receiverId: msg.sender === 'user' ? session.botId : userId,
+  createdAt: msg.createdAt.toISOString()
+}));
 
     res.json(formattedMessages);
 

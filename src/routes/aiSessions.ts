@@ -197,10 +197,10 @@ router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
     }
 
     // Check if session is still active
-    if (!session.isActive || new Date(session.endTime) <= new Date()) {
-      res.status(400).json({ error: 'Session is no longer active' });
-      return;
-    }
+    // if (!session.isActive || new Date(session.endTime) <= new Date()) {
+    //   res.status(400).json({ error: 'Session is no longer active' });
+    //   return;
+    // }
 
     // Check user has enough coins
     const userCoins = session.profile.account.cyberCoins ? Number(session.profile.account.cyberCoins) : 0;
@@ -215,7 +215,8 @@ router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
       where: { id: sessionId },
       data: { 
         endTime: newEndTime,
-        duration: session.duration + extensionMinutes
+        duration: session.duration + extensionMinutes,
+        isActive: true  // Ensure session is marked as active
       }
     });
 
