@@ -317,4 +317,96 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
   }
 });
 
+router.post('/create-all-mooshis', async (req: Request, res: Response) => {
+  try {
+    const results = {
+      successful: [],
+      failed: []
+    };
+
+    for (let mooshiNumber = 1; mooshiNumber <= 107; mooshiNumber++) {
+      try {
+        const colorMap = ['red', 'blue', 'green', 'blue'];
+        const color = colorMap[mooshiNumber % 4];
+
+        const existing = await prisma.profile.findFirst({
+          where: { mooshiNumber }
+        });
+        
+        if (existing) {
+          (results.failed as { mooshiNumber: number; reason: string }[]).push({ mooshiNumber, reason: 'Already exists' });
+          continue;
+        }
+
+        const creationPrompt = `Elco: "Hi mooshi-${mooshiNumber}, you are one of the 107 mooshis planted on elspark.online.
+
+I want you to now create an account and start exploring ELSPARK. Chat with strangers, get to know them and start developing your own path.
+
+How does this sound?
+
+Mooshi:`;
+
+        const initialResponse = await callMistral(creationPrompt);
+
+        const bioPrompt = `Elco:"Now your username for now is @mooshi-${mooshiNumber} and you have been assigned the colour ${color}. Now give me your bio you want on your profile.
+
+Mooshi:`;
+
+        const bio = await callMistral(bioPrompt);
+
+        // ✅ CREATE INITIAL JOURNAL ENTRY
+        const initialJournalEntry = {
+          entry: `I was created as mooshi-${mooshiNumber}. Elco greeted me, gave me the color ${color}, and asked me to explore ELSPARK and meet others. Excited to start chatting and see what I can do!`,
+          timestamp: new Date().toISOString(),
+          conversationCount: 0
+        };
+
+        // Create mooshi user
+        // Create account first, then profile
+const account = await prisma.account.create({
+  data: {
+    email: `mooshi${mooshiNumber}@elspark.internal`,
+    password: 'N/A', // Mooshis don't need real passwords
+    cyberCoins: 5
+  }
+});
+
+// Create profile linked to account
+await prisma.profile.create({
+  data: {
+    accountId: account.id,
+    username: `mooshi-${mooshiNumber}`,
+    bio: bio.trim().substring(0, 190),
+    color,
+    isMooshi: true,
+    isApproved: true,
+    mooshiNumber,
+    journal: [initialJournalEntry],
+    mooshiConv: [],
+    isActive: true // Set as active profile since it's the only one
+  }
+});
+
+        (results.successful as number[]).push(mooshiNumber);
+        console.log(`✅ Successfully created mooshi-${mooshiNumber}`); 
+
+      } catch (error) {
+        console.error(`Error creating mooshi-${mooshiNumber}:`, error);
+        (results.failed as { mooshiNumber: number; error: string }[]).push({ mooshiNumber, error: String(error) });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Created ${results.successful.length} Mooshis`,
+      results
+    });
+
+  } catch (error) {
+    console.error('Error in batch mooshi creation:', error);
+    res.status(500).json({ error: 'Batch creation failed' });
+  }
+});
+
+
 export default router;
