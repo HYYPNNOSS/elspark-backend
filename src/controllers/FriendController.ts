@@ -8,7 +8,6 @@ interface AuthRequest extends Request {
 }
 
 export const sendRequest = async (req: AuthRequest, res: Response) => {
-  // console.log("mousa")
   const { friendId } = req.body;
   const userId = req.user?.id;
   
@@ -75,7 +74,6 @@ export const getRequestStatus = async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Check if they're already friends
     const existingFriendship = await prisma.friendship.findFirst({
       where: {
         userId: currentUserId,
@@ -88,7 +86,6 @@ export const getRequestStatus = async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Check for pending friend request (either direction)
     const existingRequest = await prisma.friendRequest.findFirst({
       where: {
         OR: [
@@ -101,14 +98,14 @@ export const getRequestStatus = async (req: AuthRequest, res: Response) => {
 
     if (existingRequest) {
       if (existingRequest.senderId === currentUserId) {
-        res.json({ status: 'sent' }); // Current user sent the request
+        res.json({ status: 'sent' });
       } else {
-        res.json({ status: 'received' }); // Current user received the request
+        res.json({ status: 'received' });
       }
       return;
     }
 
-    res.json({ status: 'none' }); // No relationship
+    res.json({ status: 'none' });
   } catch (err) {
     console.error("Error checking friend request status:", err);
     res.status(500).json({ error: "Internal error" });
@@ -133,7 +130,6 @@ export const acceptRequest = async (req: AuthRequest, res: Response) => {
       data: { status: "accepted" },
     });
 
-    // Create bi-directional friendships
     await prisma.friendship.createMany({
       data: [
         { userId: request.senderId, friendId: request.receiverId },

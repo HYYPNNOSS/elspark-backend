@@ -9,7 +9,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
     const { content, postId, parentId } = req.body;
     const userId = (req as any).user.id;
 
-    // Validate input
     if (!content || !content.trim()) {
       res.status(400).json({ error: 'Comment content is required' });
       return;
@@ -20,7 +19,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Ensure parent comment exists if replying
     if (parentId) {
       const parentExists = await prisma.comment.findUnique({
         where: { id: parentId }
@@ -31,7 +29,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Create the comment
     const comment = await prisma.comment.create({
       data: {
         content,
@@ -53,14 +50,10 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
       }
     });
 
-    // Send success response immediately
     res.status(201).json(comment);
 
-    // Handle notifications asynchronously (don't block the response)
-    // This runs in the background and won't affect the response
     (async () => {
       try {
-        // Get the commenter's username
         const commenter = await prisma.profile.findUnique({
           where: { id: userId },
           select: { username: true }
@@ -69,7 +62,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
         if (!commenter) return;
 
         if (postId && !parentId) {
-          // Top-level comment on a post → notify post author
           const post = await prisma.post.findUnique({
             where: { id: postId },
             select: { authorId: true }
@@ -86,7 +78,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
             );
           }
         } else if (parentId) {
-          // Reply to a comment → notify parent comment author
           const parentComment = await prisma.comment.findUnique({
             where: { id: parentId },
             select: { authorId: true, postId: true }
@@ -108,7 +99,6 @@ export const createComment = async (req: Request, res: Response): Promise<void> 
           }
         }
       } catch (notificationError) {
-        // Log the error but don't fail the request
         console.error('Failed to create notification:', notificationError);
       }
     })();

@@ -15,7 +15,6 @@ interface AuthRequest extends Request {
   };
 }
 
-// GET /api/ai-messages/:sessionId - Get messages for a session
 router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -26,7 +25,6 @@ if (!userId) {
   return;
 }
 
-    // Verify session belongs to user
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
@@ -39,7 +37,6 @@ if (!userId) {
        return
     }
 
-    // Get messages for this session
     const messages = await prisma.aIMsg.findMany({
       where: {
         profileId: userId,
@@ -48,12 +45,10 @@ if (!userId) {
       orderBy: { createdAt: 'asc' }
     });
 
-    // Format messages for chat interface
-    // Format messages for chat interface
 const formattedMessages = messages.map(msg => ({
   id: msg.id,
   content: msg.message,
-  senderId: msg.sender === 'user' ? userId : `bot-${session.botId}`, // Use string for bot
+  senderId: msg.sender === 'user' ? userId : `bot-${session.botId}`,
   receiverId: msg.sender === 'user' ? session.botId : userId,
   createdAt: msg.createdAt.toISOString()
 }));

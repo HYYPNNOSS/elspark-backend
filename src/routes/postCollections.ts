@@ -7,11 +7,8 @@ const router = express.Router()
 
 const prisma = new PrismaClient()
 
-// Create new post collection
 
-// ✅ Specific routes come first
 
-// 👇 Put this AFTER so it doesn’t eat `/public`
 router.get("/posts/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) {
@@ -139,23 +136,20 @@ router.get("/allcollections", async (req: Request, res: Response) => {
       take: limitNum,
     });
 
-    // Get total count for pagination
     const totalCount = await prisma.postCollection.count();
     const totalPages = Math.ceil(totalCount / limitNum);
 
-    // Transform to match frontend expectations - keep the posts structure intact
     const transformedCollections = collections.map((collection) => ({
       id: collection.id,
       title: collection.title,
       createdAt: collection.createdAt,
       user: collection.user,
-      posts: collection.posts, // Keep the original structure with post wrapper
+      posts: collection.posts,
       postsCount: collection._count.posts,
     }));
 
     console.log("Transformed collections:", JSON.stringify(transformedCollections, null, 2));
 
-    // Return collections directly in the expected format
     res.status(200).json({
       collections: transformedCollections,
       pagination: {
@@ -172,8 +166,6 @@ router.get("/allcollections", async (req: Request, res: Response) => {
   }
 });
 
-// Get user collections
-// Fixed backend route
 router.get('/collections/:userId', async (req, res) => {
   const userId = parseInt(req.params.userId)
 
@@ -213,11 +205,9 @@ router.get('/collections/:userId', async (req, res) => {
   }
 })
 
-// Add this route to your collections router
-// REPLACE THE ENTIRE ROUTE:
 router.post('/collections/:collectionId/copy', async (req, res) => {
   const collectionId = parseInt(req.params.collectionId);
-  const { userId } = req.body; // This is profileId
+  const { userId } = req.body;
 
   if (!userId) {
     res.status(400).json({ error: 'userId is required' });
@@ -255,7 +245,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Filter out posts where profile is already a co-owner or author
     const postsToCoown = originalCollection.posts.filter(postWrapper => {
       const post = postWrapper.post;
       const isAuthor = post.authorId === userId;
@@ -268,7 +257,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Calculate unique recipients for coin distribution (accounts not profiles)
     const uniqueAccountIds = new Map<number, string>();
     
     for (const postWrapper of postsToCoown) {
@@ -278,13 +266,11 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       }
     }
 
-    // Add collection owner's account
     const recipientAccountIds = new Set<number>([
       originalCollection.user.accountId,
       ...uniqueAccountIds.keys(),
     ]);
 
-    // Get sender profile and account
     const senderProfile = await prisma.profile.findUnique({
       where: { id: userId },
       include: { account: true },
@@ -295,7 +281,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Remove sender's own account from recipients
     if (recipientAccountIds.has(senderProfile.accountId)) {
       recipientAccountIds.delete(senderProfile.accountId);
     }
@@ -308,10 +293,8 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Start transaction for coin transfers + co-ownership creation
     const transactionOps = [];
 
-    // Decrement coins from sender's account
     transactionOps.push(
       prisma.account.update({
         where: { id: senderProfile.accountId },
@@ -319,7 +302,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       })
     );
 
-    // Send 0.5 coins to each recipient account
     for (const recipientAccountId of recipientAccountIds) {
       transactionOps.push(
         prisma.account.update({
@@ -329,13 +311,12 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       );
     }
 
-    // Create co-ownership records for each post (profiles own posts)
     for (const postWrapper of postsToCoown) {
       transactionOps.push(
         prisma.postCoowner.create({
           data: {
             postId: postWrapper.post.id,
-            userId: userId, // profileId
+            userId: userId,
           },
         })
       );
@@ -343,19 +324,17 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
 
     await prisma.$transaction(transactionOps);
 
-    // Send notification to collection owner (profile, not account)
     if (recipientAccountIds.has(originalCollection.user.accountId)) {
       await createNotification(
         'coowner',
         `${senderProfile.username} purchased a copy of your digi-cura-post collection: ${originalCollection.title}`,
-        originalCollection.user.id, // profileId
+        originalCollection.user.id,
         undefined,
         undefined,
         `/profile/${senderProfile.username}`
       );
     }
 
-    // Fetch the updated posts with co-owners to return
     const updatedPosts = await prisma.post.findMany({
       where: {
         id: { in: postsToCoown.map(p => p.post.id) },
@@ -385,10 +364,9 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
   }
 });
 
-// REPLACE THE ENTIRE ROUTE:
 router.post('/collections/:collectionId/copy', async (req, res) => {
   const collectionId = parseInt(req.params.collectionId);
-  const { userId } = req.body; // This is profileId
+  const { userId } = req.body;
 
   if (!userId) {
     res.status(400).json({ error: 'userId is required' });
@@ -426,7 +404,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Filter out posts where profile is already a co-owner or author
     const postsToCoown = originalCollection.posts.filter(postWrapper => {
       const post = postWrapper.post;
       const isAuthor = post.authorId === userId;
@@ -439,7 +416,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Calculate unique recipients for coin distribution (accounts not profiles)
     const uniqueAccountIds = new Map<number, string>();
     
     for (const postWrapper of postsToCoown) {
@@ -449,13 +425,11 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       }
     }
 
-    // Add collection owner's account
     const recipientAccountIds = new Set<number>([
       originalCollection.user.accountId,
       ...uniqueAccountIds.keys(),
     ]);
 
-    // Get sender profile and account
     const senderProfile = await prisma.profile.findUnique({
       where: { id: userId },
       include: { account: true },
@@ -466,7 +440,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Remove sender's own account from recipients
     if (recipientAccountIds.has(senderProfile.accountId)) {
       recipientAccountIds.delete(senderProfile.accountId);
     }
@@ -479,10 +452,8 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       return;
     }
 
-    // Start transaction for coin transfers + co-ownership creation
     const transactionOps = [];
 
-    // Decrement coins from sender's account
     transactionOps.push(
       prisma.account.update({
         where: { id: senderProfile.accountId },
@@ -490,7 +461,6 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       })
     );
 
-    // Send 0.5 coins to each recipient account
     for (const recipientAccountId of recipientAccountIds) {
       transactionOps.push(
         prisma.account.update({
@@ -500,13 +470,12 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
       );
     }
 
-    // Create co-ownership records for each post (profiles own posts)
     for (const postWrapper of postsToCoown) {
       transactionOps.push(
         prisma.postCoowner.create({
           data: {
             postId: postWrapper.post.id,
-            userId: userId, // profileId
+            userId: userId,
           },
         })
       );
@@ -514,19 +483,17 @@ router.post('/collections/:collectionId/copy', async (req, res) => {
 
     await prisma.$transaction(transactionOps);
 
-    // Send notification to collection owner (profile, not account)
     if (recipientAccountIds.has(originalCollection.user.accountId)) {
       await createNotification(
         'coowner',
         `${senderProfile.username} purchased a copy of your digi-cura-post collection: ${originalCollection.title}`,
-        originalCollection.user.id, // profileId
+        originalCollection.user.id,
         undefined,
         undefined,
         `/profile/${senderProfile.username}`
       );
     }
 
-    // Fetch the updated posts with co-owners to return
     const updatedPosts = await prisma.post.findMany({
       where: {
         id: { in: postsToCoown.map(p => p.post.id) },
@@ -589,13 +556,11 @@ router.get('/collections/public/browse', async (req, res) => {
   }
 })
 
-// ✅ Always put this first
 
 
 
 
 
-// Get all collections endpoint
 
 
 export default router

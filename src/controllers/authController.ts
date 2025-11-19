@@ -11,16 +11,13 @@ const JWT_SECRET = process.env.JWT_SECRET as string;
 const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID!;
 const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID!;
 const EMAILJS_USER_ID = process.env.EMAILJS_USER_ID!;
-// const FRONTEND_URL = "elspark.online";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV';
 const FRONTEND_URL = process.env.FRONTEND_URL || "elspark.online";
 const FROM_EMAIL = "noreply@elspark.online";
 
-// Initialize Resend with API key
 const resend = new Resend(RESEND_API_KEY);
 
-// Warn if using default key
 if (!process.env.RESEND_API_KEY) {
   console.warn('⚠️ Using default RESEND_API_KEY. Set RESEND_API_KEY in environment variables for production.');
 }
@@ -52,13 +49,8 @@ const generateRefreshToken = async (accountId: number, profileId: number) => {
   return token;
 };
 
-// const resend = new Resend("re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV");
-// const RESEND_API_KEY = "re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV"
-// const RESEND_API_KEY = process.env.RESEND_API_KEY as string;
-// const resend = new Resend('re_WhrZ2UA4_CJsd7a8JmvqsYBFLdPqvdddV');
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  // Use console.error for important logs in production (higher priority)
   console.error('[FORGOT PASSWORD] Request received');
   console.error('[FORGOT PASSWORD] Body:', JSON.stringify(req.body));
   
@@ -137,7 +129,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     return res.json({ 
       message: "Reset link sent to your email.",
-      emailId: data?.id // Include this for debugging
+      emailId: data?.id
     });
     
   } catch (err: any) {
@@ -196,7 +188,6 @@ export const signup = async (req: Request, res: Response) => {
   }
 
   try {
-    // Check if email exists
     const emailExists = await prisma.account.findUnique({
       where: { email },
       select: { id: true },
@@ -206,7 +197,6 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // Check if username exists
     const usernameExists = await prisma.profile.findUnique({
       where: { username },
       select: { id: true },
@@ -218,7 +208,6 @@ export const signup = async (req: Request, res: Response) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create account and first profile
     const account = await prisma.account.create({
       data: {
         email,
@@ -281,7 +270,6 @@ export const signin = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // If profileId provided, use that profile, otherwise use first profile or active one
     let selectedProfile = account.profiles.find(p => p.isActive);
     
     if (profileId) {
@@ -296,7 +284,6 @@ export const signin = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "No profiles found" });
     }
 
-    // Set this profile as active
     await prisma.profile.updateMany({
       where: { accountId: account.id },
       data: { isActive: false },
@@ -381,14 +368,13 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
 
 export const createProfile = async (req: Request, res: Response) => {
   const { username } = req.body;
-  const accountId = (req as any).user?.accountId; // From auth middleware
+  const accountId = (req as any).user?.accountId;
 
   if (!username?.trim()) {
     return res.status(400).json({ error: "Username is required" });
   }
 
   try {
-    // Check profile limit
     const profileCount = await prisma.profile.count({
       where: { accountId },
     });
@@ -397,7 +383,6 @@ export const createProfile = async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Maximum ${MAX_PROFILES} profiles allowed` });
     }
 
-    // Check if username exists
     const usernameExists = await prisma.profile.findUnique({
       where: { username },
     });
@@ -451,13 +436,11 @@ export const switchProfile = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    // Set all profiles to inactive
     await prisma.profile.updateMany({
       where: { accountId },
       data: { isActive: false },
     });
 
-    // Set selected profile to active
     await prisma.profile.update({
       where: { id: profileId },
       data: { isActive: true },

@@ -19,7 +19,6 @@ import aiSessionsRoute from "./routes/aiSessions";
 import aiChatRoute from "./routes/aiChat";
 import aiMessagesRoute from "./routes/aiMessages";
 import followRouter from "./routes/followRoutes";
-// import ffmpeg from 'fluent-ffmpeg';
 import ffprobe from "ffprobe";
 import ffprobeStatic from "ffprobe-static";
 import multer from "multer";
@@ -30,7 +29,6 @@ import mooshiRoutes from './routes/mooshi';
 
 
 
-// import MP4Box from 'mp4box';
 
 import { setupGameWebSocket } from "./sockets/game.socket";
 
@@ -161,7 +159,6 @@ app.get('/api/chat/connection/:userId', async (req, res) => {
   }
 });
 
-// End chat connection (when skip is clicked)
 app.post('/api/chat/end/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -186,13 +183,10 @@ app.post('/api/chat/end/:userId', async (req, res) => {
   }
 });
 
-// Get chat messages for a room (optional - for message persistence)
 app.get('/api/chat/messages/:roomId', async (req, res) => {
   try {
     const { roomId } = req.params;
     
-    // You can store messages in a separate table if needed
-    // For now, return empty array since you're using socket memory
     res.json({ messages: [] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get messages' });
@@ -204,8 +198,6 @@ app.post('/api/coins/create-payment-intent', async (req, res) => {
   try {
     const { amount, coinAmount, userId } = req.body;
     
-    // Validate user
-    // NEW:
 const profile = await prisma.profile.findUnique({
   where: { id: userId },
   include: { account: true }
@@ -216,7 +208,6 @@ if (!profile) {
   return;
 }
 
-// Use accountId for payment intent
 const paymentIntent = await stripe.paymentIntents.create({
   amount: amount * 100,
   currency: 'gbp',
@@ -241,7 +232,6 @@ const paymentIntent = await stripe.paymentIntents.create({
   }
 });
 
-// Add webhook handler for payment confirmation
 app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -256,13 +246,11 @@ app.post('/api/coins/stripe-webhook', express.raw({type: 'application/json'}), a
     return
   }
 
-  // Handle the event
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       
       try {
-       // NEW:
 const accountId = parseInt(paymentIntent.metadata.accountId);
 const coinAmount = parseInt(paymentIntent.metadata.coinAmount);
 
@@ -295,7 +283,6 @@ console.log(`Payment succeeded for account ${accountId}: +${coinAmount} coins`);
       const failedPayment = event.data.object as Stripe.PaymentIntent;
       console.log('Payment failed:', failedPayment.id);
       
-      // Optionally log failed transaction
       try {
         const userId = parseInt(failedPayment.metadata.userId);
         await prisma.coinTransaction.create({
@@ -319,8 +306,6 @@ console.log(`Payment succeeded for account ${accountId}: +${coinAmount} coins`);
   res.json({ received: true });
 });
 
-// Optional: Add route to get user's transaction history
-// NEW:
 app.get('/api/coins/transactions/:accountId', async (req, res) => {
   try {
     const accountId = parseInt(req.params.accountId);
@@ -338,7 +323,6 @@ app.get('/api/coins/transactions/:accountId', async (req, res) => {
   }
 });
 
-// Define types
 interface VideoInfo {
   filename: string;
   url: string;
@@ -388,7 +372,7 @@ const upload = multer({
       cb(new Error("Only video files are allowed"));
     }
   },
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  limits: { fileSize: 500 * 1024 * 1024 },
 });
 
 app.post("/api/tv/upload", upload.single("video"), async (req, res) => {
@@ -398,7 +382,6 @@ app.post("/api/tv/upload", upload.single("video"), async (req, res) => {
       return;
     }
 
-    // Reload playlist to include new video
     await loadPlaylist();
 
     res.json({
@@ -417,7 +400,6 @@ if (!fs.existsSync(livevidDir)) {
   fs.mkdirSync(livevidDir, { recursive: true });
 }
 
-// Global state for the TV
 let currentState: TVState = {
   currentVideoIndex: 0,
   currentTime: 0,
@@ -432,7 +414,6 @@ async function getMP4Duration(filePath: string): Promise<number> {
   return duration ? parseFloat(duration) : 0;
 }
 
-// Load video playlist
 async function loadPlaylist(): Promise<void> {
   const videoDir = path.join(__dirname, "livevid");
   try {
@@ -459,22 +440,19 @@ async function loadPlaylist(): Promise<void> {
   }
 }
 
-// Initialize playlist
 loadPlaylist();
 
-// TV controller - manages video progression
 class TVController {
   private videoDurations: Map<string, number>;
   private intervalId: NodeJS.Timeout | null;
 
   constructor() {
-    this.videoDurations = new Map(); // Store video durations
+    this.videoDurations = new Map();
     this.intervalId = null;
     this.startContinuousPlayback();
   }
 
   startContinuousPlayback(): void {
-    // Update every second to sync clients
     this.intervalId = setInterval(() => {
       this.updatePlaybackState();
     }, 1000);
@@ -486,7 +464,6 @@ class TVController {
     const now = Date.now();
     const elapsed = (now - currentState.startTime) / 1000;
 
-    // Calculate total playlist duration with actual video lengths
     const totalPlaylistDuration = currentState.playlist.reduce(
       (sum, video) => sum + (video.duration || 0),
       0
@@ -494,7 +471,6 @@ class TVController {
 
     let cycleTime = elapsed % totalPlaylistDuration;
 
-    // Find which video we're on based on real durations
     let accumulated = 0;
     for (let i = 0; i < currentState.playlist.length; i++) {
       const video = currentState.playlist[i];
@@ -540,12 +516,10 @@ function getRandomColor(): string {
   return colors[Math.floor(Math.random() * colors.length)];
 }
 
-// userId -> socketId
 
-const persistentConnections = new Map(); // userId -> { partnerId, roomId, createdAt, status: 'active'|'ended' }
+const persistentConnections = new Map();
 const roomPresence = new Map();
 
-// ========== Random Chat Logic ==========
 const lookingQueue: number[] = [];
 const activeRooms = new Map<number, string>();
 
@@ -562,16 +536,13 @@ io.on("connection", (socket) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Broadcast to all clients
     io.emit("newMessage", message);
   });
 
-  // Handle sync requests
   socket.on("requestSync", () => {
     socket.emit("syncState", tvController.getCurrentState());
   });
 
-  // Handle user connection
   socket.on("user_connected", async (profileId: number) => {
     console.log("Profile connected with ID:", profileId);
   
@@ -587,23 +558,18 @@ io.on("connection", (socket) => {
       data: { online: true },
     });
   
-    // NEW: Check for existing persistent connection
     const existingConnection = persistentConnections.get(profileId);
     if (existingConnection && existingConnection.status === 'active') {
       const { partnerId, roomId } = existingConnection;
       
-      // Rejoin the existing room
       socket.join(roomId);
       activeRooms.set(profileId , roomId);
       
-      // Add to room presence
       if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
       roomPresence.get(roomId).add(profileId);
       
-      // Notify client about existing connection
       socket.emit("reconnected_to_existing", { partnerId, roomId });
       
-      // Notify partner that this user is back online (if partner is online)
       const partnerSocketId = onlineUsers.get(partnerId);
       if (partnerSocketId) {
         io.to(partnerSocketId).emit("partner_back_online", { partnerId: profileId });
@@ -618,13 +584,11 @@ io.on("connection", (socket) => {
     socket.emit("all_users", users);
   });
 
-  // ========== Private Message ==========
-  // NEW: (no changes needed in creation, but messages now reference profileId)
 socket.on("private_message", async ({ from, to, content }) => {
   const newMessage = await prisma.message.create({
     data: {
-      senderId: from,  // This is now profileId
-      receiverId: to,  // This is now profileId
+      senderId: from,
+      receiverId: to,
       content,
     },
   });
@@ -644,8 +608,6 @@ socket.on("private_message", async ({ from, to, content }) => {
     if (fromSocket) io.to(fromSocket).emit("private_message", message);
   });
 
-  // ========== Random Match ==========
-  // REPLACE your existing start_looking handler with this
 socket.on("start_looking", async (profileId: number) => {
   if (!profileId || typeof profileId !== "number") {
     console.error("Invalid profileId received:", profileId);
@@ -663,7 +625,6 @@ socket.on("start_looking", async (profileId: number) => {
     data: { looking: true },
   });
 
-  // Replace userId with profileId throughout:
   if (!lookingQueue.includes(profileId)) lookingQueue.push(profileId);
 
   if (lookingQueue.length >= 2) {
@@ -714,15 +675,11 @@ socket.on("start_looking", async (profileId: number) => {
     io.emit("looking_updated", lookingQueue);
   });
 
-  // Join room
-  // REPLACE your existing join_room handler with this
 socket.on("join_room", (roomId: string) => {
   socket.join(roomId);
   
-  // NEW: Track room presence
   if (!roomPresence.has(roomId)) roomPresence.set(roomId, new Set());
   
-  // Find which user this socket belongs to
   let currentUserId = null;
   for (const [userId, socketId] of onlineUsers.entries()) {
     if (socketId === socket.id) {
@@ -734,7 +691,6 @@ socket.on("join_room", (roomId: string) => {
   if (currentUserId) {
     roomPresence.get(roomId).add(currentUserId);
     
-    // Notify others in room about presence change
     const usersInRoom = Array.from(roomPresence.get(roomId));
     socket.to(roomId).emit("room_presence_updated", { 
       usersInRoom, 
@@ -748,19 +704,14 @@ socket.on("join_room", (roomId: string) => {
   }
 });
 
-  // Send message in room
-  // REPLACE your existing send_message handler with this
 socket.on("send_message", ({ roomId, message }) => {
-  // NEW: Check if both users are present in the room
   const usersInRoom = roomPresence.get(roomId);
   const bothPresent = usersInRoom && usersInRoom.size >= 2;
   
   if (bothPresent) {
-    // Allow message to be sent
     socket.to(roomId).emit("receive_message", message);
     socket.emit("message_sent", { success: true });
   } else {
-    // Block message
     socket.emit("message_sent", { 
       success: false, 
       reason: "Partner is not currently in the chat room" 
@@ -768,8 +719,6 @@ socket.on("send_message", ({ roomId, message }) => {
   }
 });
 
-  // Skip current chat
-  // REMOVE both existing skip handlers and REPLACE with this single one
   socket.on("skip", async (profileId: number) => {
     const roomId = activeRooms.get(profileId);
     const connection = persistentConnections.get(profileId);
@@ -799,8 +748,6 @@ socket.on("send_message", ({ roomId, message }) => {
     io.emit("looking_updated", lookingQueue);
   });
 
-// ADD this new handler (place it with your other socket handlers)
-// NEW:
 socket.on("check_existing_connection", (profileId: number) => {
   const connection = persistentConnections.get(profileId);
   
@@ -827,9 +774,6 @@ socket.on("check_existing_connection", (profileId: number) => {
   }
 });
 
-  // ========== Handle Disconnect ==========
-  // REPLACE your existing disconnect handler with this
-// NEW:
 socket.on("disconnect", async () => {
   let disconnectedProfileId: number | null = null;
 
@@ -847,7 +791,6 @@ socket.on("disconnect", async () => {
       data: { online: false, looking: false },
     });
 
-    // NEW: Don't end chat on disconnect - keep persistent connection alive
     const connection = persistentConnections.get(disconnectedProfileId);
     const roomId = activeRooms.get(disconnectedProfileId);
     

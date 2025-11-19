@@ -4,8 +4,6 @@ import { gameQueueService } from "../services/gameQueue.service";
 
 const prisma = new PrismaClient();
 
-// const playerColors = ["red", "blue", "green", "yellow"];
-// const playerColors: string[] = [];
 
 interface InMemoryGameSession {
   id: string;
@@ -26,8 +24,7 @@ const boardSessions: Record<string, InMemoryGameSession> = {};
 
 function createEmptyBoard(rows = 7, cols = 7): string[][] {
   const board = Array.from({ length: rows }, () => Array(cols).fill(""));
-  // Block x:3 y:3 (center) so no one can claim it
-  board[3][3] = "X"; // Use "X" to indicate blocked/unclaimable
+  board[3][3] = "X";
   return board;
 }
 
@@ -43,7 +40,6 @@ function getValidMoves(
   );
 
   if (!allPlayersMoved && !session.firstTurnMoves.has(session.players[session.currentTurn].userId)) {
-    // Restrict first move to tiles around (3,3)
     const startingTiles = [
       { x: 2, y: 3 },
       { x: 4, y: 3 },
@@ -61,7 +57,6 @@ function getValidMoves(
     return validMoves;
   }
 
-  // Standard move logic after first turn
   const seen = new Set<string>();
   const directions = [
     [-1, 0], [0, -1], [0, 1], [1, 0],
@@ -94,18 +89,7 @@ function getValidMoves(
 }
 
 
-// setInterval(() => {
   
-//       console.log('🔍 === QUEUE DEBUG STATE ===');
-//       console.log('Queue:', gameQueueService.queue);
-//       console.log('Player Colors:', Array.from(gameQueueService.playerColors.entries()));
-//       console.log('Socket Connections:', Array.from(gameQueueService.socketConnections.keys()));
-//       console.log('Players In Game:', Array.from(gameQueueService.playersInGame));
-//       console.log('Next Game Queue:', gameQueueService.nextgamequeue);
-//       console.log('Next Players Colors:', Array.from(gameQueueService.nextplayersColors.entries()));
-//       console.log('Winners Wanting Next:', Array.from(gameQueueService.winnersWantingNext));
-//       console.log('=========================');
-// }, 2000);
 
 
 
@@ -134,7 +118,6 @@ export function setupGameWebSocket(io: Server) {
       const { userId, color } = data;
     
       try {
-        // Check if color is already taken before queuing
         const takenColors = new Set(
           gameQueueService.queue.map(id => gameQueueService.playerColors.get(id)).filter(Boolean)
         );
@@ -150,12 +133,10 @@ export function setupGameWebSocket(io: Server) {
           return;
         }
     
-        // CHANGE: Set color BEFORE adding to queue
         gameQueueService.playerColors.set(userId, color);
         
         await gameQueueService.addToQueue(userId, socket);
         
-        // Color was already set above, just confirm it
         socket.emit("COLOR_CONFIRMED", { color });
     
         const { position, total } = await gameQueueService.getQueueStatus(userId);
@@ -190,7 +171,6 @@ export function setupGameWebSocket(io: Server) {
       }
     
       if (session.board[row][col] === "") {
-        // Here, store the player's color in the board
         session.board[row][col] = color;
         if (!session.firstTurnMoves.has(userId)) {
           session.firstTurnMoves.add(userId);
@@ -203,7 +183,7 @@ export function setupGameWebSocket(io: Server) {
         
           const validMoves = getValidMoves(session.board, nextColor, session);
           if (validMoves.length > 0) {
-            break; // Found a player with valid moves
+            break;
           } else {
             console.log(`⏭️ Skipping Player ${nextUserId} — no valid moves`);
           }
@@ -234,27 +214,23 @@ export function setupGameWebSocket(io: Server) {
 
     socket.on("WINNER_NEXT_MATCH", async ({ userId, color, wantNext }) => {
       if (wantNext) {
-        // CHANGE: Use Set instead of boolean
         gameQueueService.winnersWantingNext.add(userId);
         console.log(`Winner ${userId} wants next game`);
       } else {
         gameQueueService.winnersWantingNext.delete(userId);
         console.log(`Winner ${userId} doesn't want next game`);
-        return; // Exit early if they don't want next game
+        return;
       }
       gameNamespace.emit("WINNER_DECIDED");
       
-      // Set the color preference
       gameQueueService.playerColors.set(userId, color);
       socket.emit("COLOR_CONFIRMED", { color });
     
-      // FIX: Check if user is already in queue before adding
       if (!gameQueueService.queue.includes(userId)) {
         try {
           await gameQueueService.addToQueue(userId, socket);
         } catch (error) {
           console.log(`Error adding winner ${userId} to queue:`, error);
-          // If they're already in queue, just update their position info
           const { position, total } = await gameQueueService.getQueueStatus(userId);
           socket.emit("QUEUE_UPDATE", {
             position,
@@ -282,7 +258,6 @@ export function setupGameWebSocket(io: Server) {
     
       const { board, players } = session;
     
-      // Calculate scores and determine winner (existing logic)
       const playerTileCounts: Record<number, number> = {};
       for (const row of board) {
         for (const cell of row) {
@@ -319,7 +294,6 @@ export function setupGameWebSocket(io: Server) {
       });
     
       if (session.round >= 3) {
-        // Game is ending - determine final winner
         const winCounts: Record<number, number> = {};
         for (const id of session.roundWinners) {
           winCounts[id] = (winCounts[id] || 0) + 1;
@@ -335,7 +309,6 @@ export function setupGameWebSocket(io: Server) {
           : potentialWinners[Math.floor(Math.random() * potentialWinners.length)];
     
         console.log(`🏆 Game over — Final winner: Player ${gameWinner}`);
-        // console.log( gameQueueService.socketConnections.get(players.userId))
         console.log("session.id");
 
         console.log(session.id);
@@ -348,30 +321,25 @@ export function setupGameWebSocket(io: Server) {
         session.status = "ENDED";
         session.endedAt = new Date();
     
-        // FIX: Clear all current players from the queue first
         session.players.forEach(player => {
           gameQueueService.playersInGame.delete(player.userId);
-          // Remove from queue if they're in it
           const queueIndex = gameQueueService.queue.indexOf(player.userId);
           if (queueIndex !== -1) {
             gameQueueService.queue.splice(queueIndex, 1);
           }
         });
     
-        // CHANGE: Prepare next game players BEFORE cleaning up colors
         const eligibleNextGamePlayers = [
           ...gameQueueService.nextgamequeue.map(userId => {
             const color = gameQueueService.nextplayersColors.get(userId);
             return { userId, color };
           }),
-          // Include winner if they want next game
           ...(gameQueueService.winnersWantingNext.has(gameWinner) 
               ? [{ userId: gameWinner, color: gameQueueService.playerColors.get(gameWinner)! }] 
               : []
           )
         ];
     
-        // CHANGE: Clean up colors AFTER determining next game players
         for (const [userId] of gameQueueService.playerColors) {
           const shouldKeep =
             gameQueueService.nextgamequeue.includes(userId) ||
@@ -382,7 +350,6 @@ export function setupGameWebSocket(io: Server) {
           }
         }
     
-        // Process next game players
         if (eligibleNextGamePlayers.length > 0) {
           console.log("Processing eligible players for next game");
           
@@ -392,7 +359,6 @@ export function setupGameWebSocket(io: Server) {
             if (socket && color) {
               try {
                 gameQueueService.playerColors.set(userId, color);
-                // FIX: Only add to queue if not already in it
                 if (!gameQueueService.queue.includes(userId)) {
                   await gameQueueService.addToQueue(userId, socket);
                 }
@@ -401,7 +367,6 @@ export function setupGameWebSocket(io: Server) {
               }
             } else {
               console.log(`No socket or color for user ${userId}`);
-              // FIX: Only add if not already in queue
               if (!gameQueueService.queue.includes(userId) && color) {
                 gameQueueService.queue.push(userId);
                 gameQueueService.playerColors.set(userId, color);
@@ -409,7 +374,6 @@ export function setupGameWebSocket(io: Server) {
             }
           }
           
-          // Clean up next game tracking
           gameQueueService.nextgamequeue = [];
           gameQueueService.nextplayersColors.clear();
           gameQueueService.winnersWantingNext.clear();
@@ -420,7 +384,6 @@ export function setupGameWebSocket(io: Server) {
           }
         }
     
-        // Reset session for potential reuse
         session.round = 1;
         session.board = createEmptyBoard();
         session.currentTurn = 0;
@@ -428,7 +391,6 @@ export function setupGameWebSocket(io: Server) {
         session.roundWinners = [];
     
       } else {
-        // Continue to next round
         session.round += 1;
         session.board = createEmptyBoard();
         session.currentTurn = 0;
@@ -441,7 +403,6 @@ export function setupGameWebSocket(io: Server) {
     socket.on("REQUEST_SPECTATOR_VIEW", ({ userId }) => {
       console.log(`User ${userId} requesting spectator view`);
       
-      // Find any active game session
       const activeSession = Object.values(boardSessions).find(session => 
         session.status === "IN_PROGRESS"
       );
@@ -545,14 +506,10 @@ export function setupGameWebSocket(io: Server) {
         });
       }
       
-      // CHANGE: Don't delete socket connections here, let service handle it
-      // this["socketConnections"].delete(userId); // REMOVE THIS LINE
     });
   
     emitGameState(gameSession.id);
   
-    // CHANGE: Remove this line - let service handle queue clearing
-    // this["queue"] = this["queue"].filter(uid => !players.includes(uid)); // REMOVE THIS LINE
   };
 
 
@@ -560,35 +517,11 @@ export function setupGameWebSocket(io: Server) {
     gameQueueService.cleanupStaleConnections();
   }, 90000);
 
-  // function emitGameState(sessionId: string) {
-  //   const session = boardSessions[sessionId];
-  //   if (!session) return;
   
-  //   console.log("📤 Emitting new gameState to all players", {
-  //     currentTurn: session.currentTurn,
-  //     board: session.board,
-  //   });
   
-  //   const currentUserId = session.players[session.currentTurn].userId;
-  //   const currentColor = gameQueueService.playerColors.get(currentUserId);
   
-  //   const validMoves = getValidMoves(session.board, currentColor || "", session);
   
-  //   console.log(`🔍 Valid moves for Player ${currentUserId}:`, validMoves);
   
-  //   session.players.forEach(({ socketId }) => {
-  //     gameNamespace.to(socketId).emit("gameState", {
-  //       board: session.board,
-  //       currentTurnIndex: session.currentTurn,
-  //       players: session.players.map((p) => ({
-  //         id: p.userId,
-  //         username: `Player${p.userId}`,
-  //         color: gameQueueService.playerColors.get(p.userId) || null,
-  //       })),
-  //       validMoves,
-  //     });
-  //   });
-  // }  
 
   function emitGameState(sessionId: string) {
     const session = boardSessions[sessionId];
@@ -616,12 +549,10 @@ export function setupGameWebSocket(io: Server) {
       validMoves,
     };
   
-    // Emit to players
     session.players.forEach(({ socketId }) => {
       gameNamespace.to(socketId).emit("gameState", gameStateData);
     });
   
-    // Emit to all spectators (broadcast to all connected sockets)
     const spectatorData = {
       ...gameStateData,
       currentPlayer: {

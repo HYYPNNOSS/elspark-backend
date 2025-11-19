@@ -64,7 +64,6 @@ export class AIResponseService {
     userId: number
   ): Promise<string> {
 
-    // ✅ Updated with WORKING models confirmed on HF Router
     const botPersonalities: Record<number, BotPersonality> = {
       1: {
         name: "French Teacher",
@@ -122,7 +121,6 @@ IMPORTANT RULES:
 
       let text = await callHuggingFaceWithRetry(messages, bot.model);
 
-      // cleanup
       text = text.replace(/^(Assistant|Aero|Zayed|Onerios):/i, "").trim();
       text = text.split("\n")[0].trim();
 
@@ -141,13 +139,12 @@ IMPORTANT RULES:
   }
 }
 
-// ✅ Working models confirmed on HF Router (November 2025)
 const SERVERLESS_MODELS = {
-  "llama": "meta-llama/Llama-3.1-8B-Instruct",        // Fast, reliable for chat
-  "qwen": "Qwen/Qwen2.5-7B-Instruct",                 // Excellent multilingual
-  "qwen-coder": "Qwen/Qwen2.5-Coder-3B-Instruct",     // Good for creative tasks
-  "deepseek": "deepseek-ai/DeepSeek-V3.2-Exp",        // Fast reasoning model
-  "gpt-oss": "openai/gpt-oss-120b",                   // High performance open model
+  "llama": "meta-llama/Llama-3.1-8B-Instruct",
+  "qwen": "Qwen/Qwen2.5-7B-Instruct",
+  "qwen-coder": "Qwen/Qwen2.5-Coder-3B-Instruct",
+  "deepseek": "deepseek-ai/DeepSeek-V3.2-Exp",
+  "gpt-oss": "openai/gpt-oss-120b",
 };
 
 router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
@@ -159,20 +156,17 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       botId: number; 
     } = req.body;
 
-    // Validate request body
     if (!sessionId || !message || !botId) {
       res.status(400).json({ error: 'Missing required fields: sessionId, message, botId' });
       return;
     }
 
-    // Check authentication
     const userId = req.user?.profileId;
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
       return;
     }
 
-    // Verify session is active
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
@@ -187,7 +181,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Store user message
     await prisma.aIMsg.create({
       data: {
         profileId: userId,
@@ -197,10 +190,8 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Generate AI response with conversation history
     const aiResponse = await AIResponseService.generateResponse(botId, message, sessionId, userId);
 
-    // Store AI response
     await prisma.aIMsg.create({
       data: {
         profileId: userId,
@@ -217,7 +208,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/ai-chat/can-chat/:botId - Check if user can chat with bot
 router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { botId } = req.params;
@@ -230,7 +220,6 @@ router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Respon
 
     const now = new Date();
     
-    // Find active session for this bot
     const activeSession = await prisma.aISession.findFirst({
       where: {
         profileId: userId,
@@ -251,7 +240,6 @@ router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Respon
   }
 });
 
-// GET /api/ai-chat/session/:sessionId/time-remaining - Get time remaining for session
 router.get('/session/:sessionId/time-remaining', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -294,7 +282,6 @@ router.get('/session/:sessionId/time-remaining', verifyToken, async (req: AuthRe
   }
 });
 
-// GET route to fetch chat history
 router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -305,7 +292,6 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
       return;
     }
 
-    // Verify session belongs to user
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
@@ -318,7 +304,6 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
       return;
     }
 
-    // Get chat messages
     const messages = await prisma.aIMsg.findMany({
       where: {
         sessionId,

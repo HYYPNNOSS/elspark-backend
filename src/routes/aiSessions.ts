@@ -19,7 +19,6 @@ interface BotConfig {
   emoji: string;
 }
 
-// POST /api/ai-sessions - Create new AI session
 router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { botId, duration, cost }: { botId: number; duration: number; cost: number } = req.body;
@@ -35,7 +34,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Get profile with account data
     const profile = await prisma.profile.findUnique({
       where: { id: profileId },
       include: { account: true }
@@ -46,7 +44,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Convert Decimal to number for comparison
     const userCoins = profile.account.cyberCoins ? Number(profile.account.cyberCoins) : 0;
 
     if (userCoins < cost) {
@@ -54,11 +51,10 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Create AI session linked to profile
     const endTime = new Date(Date.now() + duration * 60 * 1000);
     const session = await prisma.aISession.create({
       data: {
-        profileId: profileId, // userId field now references profileId
+        profileId: profileId,
         botId,
         duration,
         endTime,
@@ -66,7 +62,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Deduct coins from account using decrement
     await prisma.account.update({
       where: { id: profile.accountId },
       data: { cyberCoins: { decrement: cost } }
@@ -83,7 +78,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/ai-sessions/active - Get user's active sessions
 router.get('/active', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const profileId = req.user?.profileId || req.user?.userId;
@@ -102,16 +96,14 @@ router.get('/active', verifyToken, async (req: AuthRequest, res: Response) => {
       4: { name: "Zainab", emoji: "🏊‍♀️" }
     };
 
-    // Get active sessions for this profile
     const sessions = await prisma.aISession.findMany({
       where: {
-        profileId: profileId, // userId field references profileId
+        profileId: profileId,
         isActive: true,
         endTime: { gt: now }
       }
     });
 
-    // Format for frontend
     const aiBots = sessions.map((session: any) => ({
       id: session.botId,
       name: BOT_CONFIG[session.botId]?.name || 'Unknown',
@@ -140,7 +132,6 @@ router.get('/history/:botId', verifyToken, async (req: AuthRequest, res: Respons
       return;
     }
 
-    // Get all sessions for this bot and profile
     const sessions = await prisma.aISession.findMany({
       where: {
         profileId: profileId,
@@ -166,7 +157,6 @@ router.get('/history/:botId', verifyToken, async (req: AuthRequest, res: Respons
   }
 });
 
-// POST /api/ai-sessions/extend - Extend active session
 router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.body;
@@ -179,7 +169,6 @@ router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Get the session
     const session = await prisma.aISession.findUnique({
       where: { id: sessionId },
       include: { profile: { include: { account: true } } }
@@ -190,37 +179,28 @@ router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Verify session belongs to user
     if (session.profileId !== profileId) {
       res.status(403).json({ error: 'Unauthorized to extend this session' });
       return;
     }
 
-    // Check if session is still active
-    // if (!session.isActive || new Date(session.endTime) <= new Date()) {
-    //   res.status(400).json({ error: 'Session is no longer active' });
-    //   return;
-    // }
 
-    // Check user has enough coins
     const userCoins = session.profile.account.cyberCoins ? Number(session.profile.account.cyberCoins) : 0;
     if (userCoins < extensionCost) {
       res.status(400).json({ error: 'Insufficient coins' });
       return;
     }
 
-    // Extend the session
     const newEndTime = new Date(session.endTime.getTime() + extensionMinutes * 60 * 1000);
     const updatedSession = await prisma.aISession.update({
       where: { id: sessionId },
       data: { 
         endTime: newEndTime,
         duration: session.duration + extensionMinutes,
-        isActive: true  // Ensure session is marked as active
+        isActive: true
       }
     });
 
-    // Deduct coins
     await prisma.account.update({
       where: { id: session.profile.accountId },
       data: { cyberCoins: { decrement: extensionCost } }
@@ -238,7 +218,6 @@ router.post('/extend', verifyToken, async (req: AuthRequest, res: Response) => {
 });
 
 
-// POST /api/ai-sessions/cleanup - Cleanup expired sessions
 router.post('/cleanup', async (req: Request, res: Response) => {
   try {
     const now = new Date();

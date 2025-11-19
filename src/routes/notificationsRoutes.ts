@@ -4,21 +4,16 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const notificationsRouter = Router();
 
-// Interface for authenticated request
 interface AuthRequest extends Request {
   user?: { id: number; profileId: number; username: string };
 }
 
-// Middleware to verify token (you should already have this)
 const verifyToken = (req: any, res: any, next: any) => {
-  // Your existing token verification middleware
-  // This should set req.user with profileId and username
   next();
 };
 
-// GET /api/notifications/all - Get all notifications for a profile
 notificationsRouter.get("/all", async (req: any, res) => {
-  const profileId = parseInt(req.query.userId as string); // Keep param name for backwards compatibility
+  const profileId = parseInt(req.query.userId as string);
 
   if (!profileId || isNaN(profileId)) {
     res.status(400).json({ error: "Valid profileId is required" });
@@ -26,16 +21,14 @@ notificationsRouter.get("/all", async (req: any, res) => {
   }
 
   try {
-    // ✅ Check if the profile exists first
     const profile = await prisma.profile.findUnique({ where: { id: profileId } });
     if (!profile) {
       res.status(404).json({ error: "Profile not found" });
       return;
     }
 
-    // ✅ Get notifications only for that profile
     const notifications = await prisma.notification.findMany({
-      where: { profileId: profileId }, // userId field now references profileId
+      where: { profileId: profileId },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -47,11 +40,9 @@ notificationsRouter.get("/all", async (req: any, res) => {
   }
 });
 
-// POST /api/notifications - Create a new notification
 notificationsRouter.post("/", verifyToken, async (req: any, res) => {
   const { type, message, userId, postId, commentId, route } = req.body;
 
-  // Validate required fields
   if (!type || !message || !userId) {
     res.status(400).json({
       error: "Type, message, and userId are required",
@@ -60,7 +51,6 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
   }
 
   try {
-    // Check if target profile exists (userId is actually profileId)
     const targetProfile = await prisma.profile.findUnique({
       where: { id: userId },
       select: { id: true },
@@ -71,7 +61,6 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Create notification
     const notification = await prisma.notification.create({
       data: {
         type,
@@ -89,7 +78,6 @@ notificationsRouter.post("/", verifyToken, async (req: any, res) => {
   }
 });
 
-// PUT /api/notifications/:id/read - Mark notification as read
 notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
   const { id } = req.params;
   const profileId = req.user?.profileId || req.user?.id;
@@ -100,7 +88,6 @@ notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
   }
 
   try {
-    // Check if notification belongs to current profile
     const notification = await prisma.notification.findUnique({
       where: { id },
       select: { profileId: true },
@@ -118,7 +105,6 @@ notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Mark as read
     const updatedNotification = await prisma.notification.update({
       where: { id },
       data: { read: true },
@@ -131,7 +117,6 @@ notificationsRouter.put("/:id/read", verifyToken, async (req: any, res) => {
   }
 });
 
-// PUT /api/notifications/mark-all-read - Mark all notifications as read for current profile
 notificationsRouter.put("/mark-all-read", verifyToken, async (req: any, res) => {
   const profileId = req.user?.profileId || req.user?.id;
 
@@ -159,7 +144,6 @@ notificationsRouter.put("/mark-all-read", verifyToken, async (req: any, res) => 
   }
 });
 
-// GET /api/notifications/unread-count - Get count of unread notifications
 notificationsRouter.get("/unread-count", verifyToken, async (req: any, res) => {
   const profileId = req.user?.profileId || req.user?.id;
 
@@ -183,7 +167,6 @@ notificationsRouter.get("/unread-count", verifyToken, async (req: any, res) => {
   }
 });
 
-// DELETE /api/notifications/:id - Delete a specific notification
 notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
   const { id } = req.params;
   const profileId = req.user?.profileId || req.user?.id;
@@ -194,7 +177,6 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
   }
 
   try {
-    // Check if notification belongs to current profile
     const notification = await prisma.notification.findUnique({
       where: { id },
       select: { profileId: true },
@@ -212,7 +194,6 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Delete notification
     await prisma.notification.delete({
       where: { id },
     });
@@ -224,11 +205,10 @@ notificationsRouter.delete("/:id", verifyToken, async (req: any, res) => {
   }
 });
 
-// Helper function to create notifications (export this to use in other routes)
 export const createNotification = async (
   type: string,
   message: string,
-  profileId: number, // Changed from userId to profileId for clarity
+  profileId: number,
   postId?: string,
   commentId?: string,
   route?: string
@@ -238,7 +218,7 @@ export const createNotification = async (
       data: {
         type,
         message,
-        profileId: profileId, // userId field in schema references profileId
+        profileId: profileId,
         postId: postId || null,
         commentId: commentId || null,
         route: route || null,

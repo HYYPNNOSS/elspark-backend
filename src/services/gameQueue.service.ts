@@ -1,4 +1,3 @@
-// backend/src/services/gameQueue.service.ts
 import { PrismaClient } from '@prisma/client';
 import { Socket } from 'socket.io';
 
@@ -43,7 +42,6 @@ export class GameQueueService {
       return;
     }
     
-    // Clear any existing timers
     const existingTimer = this.queueTimers.get(userId);
     if (existingTimer) {
       clearTimeout(existingTimer);
@@ -58,7 +56,6 @@ export class GameQueueService {
         this.playerColors.set(userId, storedColor);
       }
   
-      // Add to front for priority
       this.queue.unshift(userId);
       this.nextgamequeue = this.nextgamequeue.filter(id => id !== userId);
       this.nextplayersColors.delete(userId);
@@ -166,7 +163,6 @@ export class GameQueueService {
     } else {
       console.log(`❌ Not enough valid players: ${uniqueColorPlayers.length}/${PLAYERS_REQUIRED}`);
       
-      // Emit error to all queued players with sockets
       this.queue.forEach((uid) => {
         const socket = this.socketConnections.get(uid);
         if (socket) {
@@ -188,7 +184,6 @@ export class GameQueueService {
       if (timer) clearTimeout(timer);
       this.queueTimers.delete(userId);
   
-      // Only delete socket and color if player is NOT in an active game
       if (!this.playersInGame.has(userId)) {
         this.socketConnections.delete(userId);
         console.log("removing socket and color for user not in game:", userId);
@@ -213,14 +208,12 @@ export class GameQueueService {
   }
 
   public async startGameSession(selectedPlayers: number[]): Promise<void> {
-    // Clear timers
     selectedPlayers.forEach(pid => {
       const timer = this.queueTimers.get(pid);
       if (timer) clearTimeout(timer);
       this.queueTimers.delete(pid);
     });
   
-    // Clear previous game state and mark players as in new game
     selectedPlayers.forEach(pid => {
       this.playersInGame.add(pid);
     });
@@ -253,13 +246,11 @@ export class GameQueueService {
   
     this.activeSessions.set(gameSession.id, inMemoryGame);
   
-    // Update database
     await prisma.profile.updateMany({
       where: { id: { in: selectedPlayers } },
       data: { looking: false, isonrand: true }
     });
   
-    // Emit game started to all players
     selectedPlayers.forEach(pid => {
       const socket = this.socketConnections.get(pid);
       if (socket) {
@@ -276,7 +267,6 @@ export class GameQueueService {
       }
     });
     
-    // Remove selected players from queue
     this.queue = this.queue.filter(uid => !selectedPlayers.includes(uid));
     
     console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
@@ -356,7 +346,6 @@ export class GameQueueService {
     return { position: position + 1, total: this.queue.length };
   }
 
-  // ✅ Handle color selection
   handleColorSelection(userId: number, selectedColor: string, forceAssign = false): boolean {
     const taken = new Set(this.queue.map(id => this.playerColors.get(id)).filter(Boolean));
   
@@ -372,7 +361,7 @@ export class GameQueueService {
         this.nextgamequeue.push(userId);
         console.log(`User ${userId} added to nextgamequeue.`);
       }
-      return false; // Color not assigned
+      return false;
     }
   
     this.playerColors.set(userId, selectedColor);
@@ -382,7 +371,7 @@ export class GameQueueService {
     if (socket) {
       socket.emit('COLOR_CONFIRMED', { color: selectedColor });
     }
-    return true; // Color assigned successfully
+    return true;
   }
 
   
@@ -390,7 +379,6 @@ export class GameQueueService {
   
   
 
-  // ✅ Register listener (call this in your socket controller)
   onColorSelect(socket: Socket): void {
     socket.on('COLOR_SELECT', ({ userId, color }) => {
       this.handleColorSelection(userId, color);

@@ -6,12 +6,10 @@ import { createNotification } from './notificationsRoutes';
 const followRouter = express.Router();
 const prisma = new PrismaClient();
 
-// Follow a user
 followRouter.post("/follow", verifyToken, async (req: any, res) => {
     const { userId } = req.body;
     const followerId = req.user.id;
   
-    // Validation
     if (!userId) {
       res.status(400).json({ error: "User ID is required" });
       return;
@@ -23,7 +21,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   
     try {
-      // Check if user to follow exists
       const userToFollow = await prisma.profile.findUnique({
         where: { id: userId },
         select: { id: true, username: true },
@@ -34,7 +31,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         return;
       }
   
-      // Check if already following
       const existingFollow = await prisma.follow.findUnique({
         where: {
           followerId_followingId: {
@@ -51,7 +47,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
 
       
   
-      // Create follow relationship
       await prisma.follow.create({
         data: {
           followerId: followerId,
@@ -59,7 +54,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         },
       });
   
-      // Optional: Create notification for the followed user
       await prisma.notification.create({
         data: {
           type: "follow",
@@ -74,7 +68,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         followerId, 
         undefined, 
         undefined,  
-        `/profile/$${req.user.username}` // Route to follower's profile
+        `/profile/$${req.user.username}`
       );
 
       res.status(200).json({
@@ -89,12 +83,10 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
   
-  // Unfollow a user
   followRouter.post("/unfollow", verifyToken, async (req: any, res) => {
     const { userId } = req.body;
     const followerId = req.user.id;
   
-    // Validation
     if (!userId) {
       res.status(400).json({ error: "User ID is required" });
       return;
@@ -106,7 +98,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   
     try {
-      // Check if user exists
       const userToUnfollow = await prisma.profile.findUnique({
         where: { id: userId },
         select: { id: true, username: true },
@@ -117,7 +108,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         return;
       }
   
-      // Check if currently following
       const existingFollow = await prisma.follow.findUnique({
         where: {
           followerId_followingId: {
@@ -132,7 +122,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         return;
       }
   
-      // Remove follow relationship
       await prisma.follow.delete({
         where: {
           followerId_followingId: {
@@ -152,7 +141,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
   
-  // Get posts from people you follow (public posts only)
   followRouter.get("/following-feed", verifyToken, async (req: any, res) => {
     console.log("heyyy following-feed")
   
@@ -162,7 +150,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     const skip = (page - 1) * limit;
   
     try {
-      // Get posts from people the user follows
       const posts = await prisma.post.findMany({
         where: {
           author: {
@@ -172,7 +159,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
               },
             },
           },
-          isPrivate: false, // Only public posts
+          isPrivate: false,
         },
         include: {
           author: {
@@ -206,7 +193,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
             orderBy: {
               createdAt: "desc",
             },
-            take: 3, // Get only first 3 comments
+            take: 3,
           },
           _count: {
             select: {
@@ -221,7 +208,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         take: limit,
       });
   
-      // Get total count for pagination
       const totalPosts = await prisma.post.count({
         where: {
           author: {
@@ -253,7 +239,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
   
-  // Get collections from people you follow
   followRouter.get("/following-collections", verifyToken, async (req: any, res) => {
     console.log("heyyy following-collections")
     const userId = req.user.id;
@@ -262,7 +247,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     const skip = (page - 1) * limit;
   
     try {
-      // Get collections from people the user follows
       const collections = await prisma.postCollection.findMany({
         where: {
           user: {
@@ -300,7 +284,7 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
                 },
               },
             },
-            take: 5, // Show first 5 posts in each collection
+            take: 5,
           },
           _count: {
             select: {
@@ -315,7 +299,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         take: limit,
       });
   
-      // Get total count for pagination
       const totalCollections = await prisma.postCollection.count({
         where: {
           user: {
@@ -346,7 +329,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
 
-  // Get user's followers
   followRouter.get("/followers", verifyToken, async (req: any, res) => {
     const userId = req.user.id;
   
@@ -384,7 +366,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
 
-  // Get users you're following
   followRouter.get("/following", verifyToken, async (req: any, res) => {
     const userId = req.user.id;
   
@@ -422,7 +403,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
 
-  // NEW ENDPOINT: Show people I follow (just id, username, profilePicture)
   followRouter.get("/my-following", verifyToken, async (req: any, res) => {
     const userId = req.user.id;
     try {
@@ -444,7 +424,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
         },
       });
 
-      // Only return the user objects
       res.status(200).json({
         following: following.map((f) => f.following),
         count: following.length,
@@ -455,7 +434,6 @@ followRouter.post("/follow", verifyToken, async (req: any, res) => {
     }
   });
   
-  // Check if you're following a specific user
   followRouter.get("/is-following/:userId", verifyToken, async (req: any, res) => {
     const userId = parseInt(req.params.userId);
     const followerId = req.user.id;

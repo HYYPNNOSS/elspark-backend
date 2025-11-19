@@ -16,14 +16,13 @@ export const verifyToken = (req: any, res: Response, next: NextFunction) => {
     const decoded = jwt.verify(token, JWT_SECRET) as { 
       accountId: number; 
       profileId: number;
-      id?: number; // For backwards compatibility
+      id?: number;
     };
     
-    // Set both for compatibility
     req.user = {
       accountId: decoded.accountId,
       profileId: decoded.profileId || decoded.id,
-      id: decoded.profileId || decoded.id // For old code that uses req.user.id
+      id: decoded.profileId || decoded.id
     };
     
     next();

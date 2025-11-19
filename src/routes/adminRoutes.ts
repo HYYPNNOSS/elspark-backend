@@ -4,10 +4,8 @@ import { PrismaClient } from '@prisma/client';
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// GET /users - Get all profiles with statistics
 router.get('/users', async (req: Request, res: Response) => {
   try {
-    // Get all profiles (excluding sensitive data)
     const profiles = await prisma.profile.findMany({
       select: {
         id: true,
@@ -30,12 +28,11 @@ router.get('/users', async (req: Request, res: Response) => {
         }
       },
       orderBy: [
-        { isMooshi: 'asc' }, // Non-Mooshis first
-        { createdAt: 'desc' } // Then by creation date
+        { isMooshi: 'asc' },
+        { createdAt: 'desc' }
       ]
     });
 
-    // Transform to include email and cyberCoins at profile level
     const users = profiles.map(profile => ({
       id: profile.id,
       username: profile.username,
@@ -53,7 +50,6 @@ router.get('/users', async (req: Request, res: Response) => {
       accountId: profile.accountId
     }));
 
-    // Calculate statistics
     const mooshis = users.filter(user => user.isMooshi);
     const regularUsers = users.filter(user => !user.isMooshi);
     const approvedUsers = regularUsers.filter(user => user.isApproved).length;
@@ -61,7 +57,7 @@ router.get('/users', async (req: Request, res: Response) => {
     const onlineUsers = users.filter(user => user.online).length;
 
     const stats = {
-      totalUsers: regularUsers.length, // Only count regular profiles in total
+      totalUsers: regularUsers.length,
       approvedUsers,
       pendingUsers,
       onlineUsers,
@@ -85,13 +81,11 @@ router.get('/users', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /users/:id/approval - Update profile approval status
 router.put('/users/:id/approval', async (req: Request, res: Response) => {
   try {
     const profileId = parseInt(req.params.id);
     const { isApproved } = req.body;
 
-    // Validate input
     if (isNaN(profileId)) {
       res.status(400).json({ 
         success: false,
@@ -108,7 +102,6 @@ router.put('/users/:id/approval', async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if profile exists and is not a Mooshi
     const existingProfile = await prisma.profile.findUnique({
       where: { id: profileId },
       select: { 
@@ -140,7 +133,6 @@ router.put('/users/:id/approval', async (req: Request, res: Response) => {
       return;
     }
 
-    // Update profile approval status
     const updatedProfile = await prisma.profile.update({
       where: { id: profileId },
       data: { isApproved },
@@ -181,7 +173,6 @@ router.put('/users/:id/approval', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats - Get just the statistics (lighter endpoint)
 router.get('/stats', async (req: Request, res: Response) => {
   try {
     const [totalUsers, approvedUsers, onlineUsers, totalMooshis] = await Promise.all([
@@ -214,7 +205,6 @@ router.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
-// Optional: GET /accounts - Get all accounts with their profiles
 router.get('/accounts', async (req: Request, res: Response) => {
   try {
     const accounts = await prisma.account.findMany({
@@ -241,7 +231,6 @@ router.get('/accounts', async (req: Request, res: Response) => {
       }
     });
 
-    // Calculate statistics
     const totalAccounts = accounts.length;
     const accountsWithMultipleProfiles = accounts.filter(acc => acc.profiles.length > 1).length;
     const totalProfiles = accounts.reduce((sum, acc) => sum + acc.profiles.length, 0);

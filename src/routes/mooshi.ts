@@ -5,7 +5,7 @@ import { verifyToken } from '../middlewares/authMiddleware';
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = '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';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface AuthRequest extends Request {
@@ -105,7 +105,6 @@ class AIResponseService {
     const bot = botPersonalities[botId];
     if (!bot) return "I'm not sure how to respond to that.";
 
-    // Construct the full prompt
     const fullPrompt = `${bot.prompt}\n\nUser: ${message}\n\nRespond in character, keeping your response helpful and engaging (max 150 words).`;
 
     try {
@@ -117,7 +116,6 @@ class AIResponseService {
         return "I'm thinking... Could you rephrase that?";
       }
 
-      // Limit response length
       const MAX_MESSAGE_LENGTH = 1000;
       return trimmedResponse.length > MAX_MESSAGE_LENGTH 
         ? trimmedResponse.slice(0, MAX_MESSAGE_LENGTH) 
@@ -137,20 +135,17 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       botId: number; 
     } = req.body;
 
-    // Validate request body
     if (!sessionId || !message || !botId) {
       res.status(400).json({ error: 'Missing required fields: sessionId, message, botId' });
       return;
     }
 
-    // Check authentication
     const userId = req.user?.userId;
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
       return;
     }
 
-    // Verify session is active
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
@@ -165,7 +160,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Store user message
     await prisma.aIMsg.create({
       data: {
         profileId: userId,
@@ -175,10 +169,8 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Generate AI response
     const aiResponse = await AIResponseService.generateResponse(botId, message, userId);
 
-    // Store AI response
     await prisma.aIMsg.create({
       data: {
         profileId: userId,
@@ -195,7 +187,6 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/ai-chat/can-chat/:botId - Check if user can chat with bot
 router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { botId } = req.params;
@@ -208,7 +199,6 @@ router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Respon
 
     const now = new Date();
     
-    // Find active session for this bot
     const activeSession = await prisma.aISession.findFirst({
       where: {
         profileId: userId,
@@ -229,7 +219,113 @@ router.get('/can-chat/:botId', verifyToken, async (req: AuthRequest, res: Respon
   }
 });
 
-// GET /api/ai-chat/session/:sessionId/time-remaining - Get time remaining for session
+
+
+router.post('/respond', async (req: Request, res: Response) => {
+  try {
+    const { mooshiNumber, username, userMessage, chatHistory } = req.body;
+
+    if (!mooshiNumber || !userMessage) {
+      res.status(400).json({ error: 'Missing required fields' });
+      return; 
+    }
+
+    
+    const mooshi = await prisma.profile.findFirst({
+      where: { mooshiNumber: mooshiNumber }
+    });
+
+    if (!mooshi) {
+      res.status(404).json({ error: 'Mooshi not found' });
+      return;
+    }
+
+    const journalEntries = mooshi.journal 
+      ? (mooshi.journal as any[]).slice(-4)
+      : [];
+
+    let prompt = `You are mooshi-${mooshiNumber}, a friendly AI entity on ELSPARK. 
+Your color is ${mooshi.color}.
+Your bio: ${mooshi.bio}
+
+Recent journal entries:
+${journalEntries.map((j: any) => `- ${j.entry}`).join('\n')}
+
+Chat history:
+${chatHistory || 'No previous messages'}
+
+${username} just said: "${userMessage}"
+
+Respond naturally as mooshi-${mooshiNumber}. Keep it SHORT (1-2 sentences). Be casual and friendly. NO markdown, NO special formatting, NO asterisks.
+
+Your response:`;
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'mistralai/mistral-7b-instruct',
+        max_tokens: 150,
+        temperature: 0.8,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('OpenRouter API error:', response.status);
+      res.status(500).json({ 
+        error: 'AI service error',
+        response: "Sorry, I'm having trouble thinking right now..."
+      });
+      return;
+    }
+
+    const data = await response.json();
+    
+    let aiResponse = data?.choices?.[0]?.message?.content?.trim() || '';
+    
+    aiResponse = aiResponse
+      .replace(/<s>/g, '')
+      .replace(/<\/s>/g, '')
+      .replace(/<\|user\|>/g, '')
+      .replace(/<\|assistant\|>/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/Your response:/gi, '')
+      .replace(/mooshi-\d+:/gi, '')
+      .trim();
+
+    if (!aiResponse || aiResponse.length === 0) {
+      aiResponse = "...";
+    }
+
+    if (aiResponse.length > 500) {
+      aiResponse = aiResponse.substring(0, 500);
+    }
+
+    console.log(`Mooshi ${mooshiNumber} responding:`, aiResponse);
+
+    res.json({ response: aiResponse });
+
+  } catch (error) {
+    console.error('Error in mooshi respond:', error);
+    
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Internal error',
+        response: "Hmm, I'm having trouble responding..."
+      });
+    }
+  }
+});
+
 router.get('/session/:sessionId/time-remaining', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -272,7 +368,6 @@ router.get('/session/:sessionId/time-remaining', verifyToken, async (req: AuthRe
   }
 });
 
-// GET route to fetch chat history
 router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -283,7 +378,6 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
       return;
     }
 
-    // Verify session belongs to user
     const session = await prisma.aISession.findFirst({
       where: {
         id: sessionId,
@@ -296,7 +390,6 @@ router.get('/:sessionId', verifyToken, async (req: AuthRequest, res: Response) =
       return;
     }
 
-    // Get chat messages
     const messages = await prisma.aIMsg.findMany({
       where: {
         sessionId,
@@ -354,24 +447,20 @@ Mooshi:`;
 
         const bio = await callMistral(bioPrompt);
 
-        // ✅ CREATE INITIAL JOURNAL ENTRY
         const initialJournalEntry = {
           entry: `I was created as mooshi-${mooshiNumber}. Elco greeted me, gave me the color ${color}, and asked me to explore ELSPARK and meet others. Excited to start chatting and see what I can do!`,
           timestamp: new Date().toISOString(),
           conversationCount: 0
         };
 
-        // Create mooshi user
-        // Create account first, then profile
 const account = await prisma.account.create({
   data: {
     email: `mooshi${mooshiNumber}@elspark.internal`,
-    password: 'N/A', // Mooshis don't need real passwords
+    password: 'N/A',
     cyberCoins: 5
   }
 });
 
-// Create profile linked to account
 await prisma.profile.create({
   data: {
     accountId: account.id,
@@ -383,7 +472,7 @@ await prisma.profile.create({
     mooshiNumber,
     journal: [initialJournalEntry],
     mooshiConv: [],
-    isActive: true // Set as active profile since it's the only one
+    isActive: true
   }
 });
 

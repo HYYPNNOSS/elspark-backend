@@ -1,4 +1,3 @@
-// ./routes/userRoutes.ts
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { verifyToken } from "../middlewares/authMiddleware";
@@ -9,7 +8,7 @@ import { profilePictureUpload } from "../config/wasabi-config";
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// Get all profiles
+
 router.get("/", async (req: Request, res: Response) => {
   try {
     const profiles = await prisma.profile.findMany({
@@ -34,7 +33,7 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
-// Get current user/profile info (add this new endpoint)
+
 router.get("/me", verifyToken, async (req: any, res: Response) => {
   try {
     const profileId = req.user.profileId || req.user.id;
@@ -76,7 +75,7 @@ router.get("/me", verifyToken, async (req: any, res: Response) => {
   }
 });
 
-// Get notifications
+
 router.get("/notifications", verifyToken, async (req: any, res) => {
   try {
     const profileId = req.user.profileId || req.user.id;
@@ -93,7 +92,7 @@ router.get("/notifications", verifyToken, async (req: any, res) => {
   }
 });
 
-// Get public posts
+
 router.get("/public_post", async (req, res) => {
   try {
     const publicPosts = await prisma.post.findMany({
@@ -124,7 +123,7 @@ router.get("/public_post", async (req, res) => {
   }
 });
 
-// Get profile by ID
+
 router.get("/id/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -193,7 +192,7 @@ router.get("/id/:id", async (req: Request, res: Response) => {
   }
 });
 
-// Get profile by username
+
 router.get("/:username", async (req: Request, res: Response) => {
   const { username } = req.params;
 
@@ -263,12 +262,10 @@ router.get("/:username", async (req: Request, res: Response) => {
   }
 });
 
-// Send cyber coins (now works across profiles in same account)
 router.post("/send-coins", verifyToken, async (req: any, res) => {
   const { recipientId, amount } = req.body;
   const senderProfileId = req.user.profileId || req.user.id;
 
-  // Validation
   if (!recipientId || !amount) {
     res.status(400).json({ error: "Recipient ID and amount are required" });
     return;
@@ -284,11 +281,9 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
     return;
   }
 
-  // Round to 2 decimal places
   const roundedAmount = Math.round(amount * 100) / 100;
 
   try {
-    // Get sender profile and account
     const senderProfile = await prisma.profile.findUnique({
       where: { id: senderProfileId },
       include: { account: true },
@@ -299,7 +294,6 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Get recipient profile and account
     const recipientProfile = await prisma.profile.findUnique({
       where: { id: recipientId },
       include: { account: true },
@@ -310,7 +304,6 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Check if trying to send to another profile in same account
     if (senderProfile.accountId === recipientProfile.accountId) {
       res
         .status(400)
@@ -325,21 +318,17 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
       return;
     }
 
-    // Perform the transaction between accounts
     await prisma.$transaction([
-      // Deduct from sender's account
       prisma.account.update({
         where: { id: senderProfile.accountId },
         data: { cyberCoins: { decrement: roundedAmount } },
       }),
-      // Add to recipient's account
       prisma.account.update({
         where: { id: recipientProfile.accountId },
         data: { cyberCoins: { increment: roundedAmount } },
       }),
     ]);
 
-    // Get updated balance
     const updatedSenderAccount = await prisma.account.findUnique({
       where: { id: senderProfile.accountId },
       select: { cyberCoins: true },
@@ -357,13 +346,11 @@ router.post("/send-coins", verifyToken, async (req: any, res) => {
   }
 });
 
-// Update bio
 router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
   const { id } = req.params;
   const { bio } = req.body;
   const profileId = req.user.profileId || req.user.id;
 
-  // Check if user is updating their own bio
   if (parseInt(id) !== profileId) {
     res.status(403).json({ error: "You can only update your own bio" });
     return;
@@ -401,7 +388,6 @@ router.put("/:id/bio", verifyToken, async (req: any, res: Response) => {
   }
 });
 
-// Update profile picture
 router.put(
   "/:id/profile-picture",
   verifyToken,
@@ -410,7 +396,6 @@ router.put(
     const { id } = req.params;
     const profileId = req.user.profileId || req.user.id;
 
-    // Check if user is updating their own profile picture
     if (parseInt(id) !== profileId) {
       res
         .status(403)
@@ -468,7 +453,6 @@ router.put(
   }
 );
 
-// Get profile's posts by username
 router.get("/:username/posts", async (req: Request, res: Response) => {
   const { username } = req.params;
 
@@ -512,7 +496,6 @@ router.get("/:username/posts", async (req: Request, res: Response) => {
   }
 });
 
-// Get profile picture by ID
 router.get("/profile-picture/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -540,7 +523,6 @@ router.get("/profile-picture/:id", async (req: Request, res: Response) => {
   }
 });
 
-// Update profile (bio and/or picture)
 router.put(
   "/:id",
   verifyToken,
