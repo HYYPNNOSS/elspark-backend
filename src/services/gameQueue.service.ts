@@ -3,41 +3,117 @@ import { Socket } from 'socket.io';
 
 const prisma = new PrismaClient();
 const QUEUE_TIMEOUT_MS = 300000;
-const PLAYERS_REQUIRED = 4;
-
-interface InMemoryGame {
-  board: (number | null)[][];
-  players: { id: number; username: string; color?: string }[];
-  currentTurnIndex: number;
-  status: 'in_progress' | 'ended';
-  winnerId?: number;
-}
+const VALID_COLORS = ['red', 'brown', 'blue', 'green'];
 
 export class GameQueueService {
-  public queue: number[] = [];
-  public nextgamequeue: number[] = [];
-
+  // Separate queue for each color
+  public colorQueues: Map<string, number[]> = new Map([
+    ['red', []],
+    ['brown', []],
+    ['blue', []],
+    ['green', []]
+  ]);
+  
   public queueTimers: Map<number, NodeJS.Timeout> = new Map();
   public socketConnections: Map<number, Socket> = new Map();
-  public activeSessions: Map<string, InMemoryGame> = new Map();
   public playerColors: Map<number, string> = new Map();
-  public nextplayersColors: Map<number, string> = new Map();
   public winnersWantingNext: Set<number> = new Set();
   public playersInGame: Set<number> = new Set();
-
+  private queueViewNamespace?: any;
+  public winnerPriority: Map<number, { color: string, expiresAt: number }> = new Map();
+  private readonly WINNER_DECISION_TIMEOUT = 10000;
+  
+  // NEW: Track if someone can start the game
+  public canStartGame: boolean = false;
+  private botCounter: number = 1;
 
   public isUserInQueue(userId: number): boolean {
-    return this.queue.includes(userId);
+    for (const queue of this.colorQueues.values()) {
+      if (queue.includes(userId)) return true;
+    }
+    return false;
   }
 
-  async addToQueue(userId: number, socket: Socket): Promise<void> {
-    
-    this.socketConnections.set(userId, socket);
-    console.log("=================socket=================");
-    console.log(gameQueueService.socketConnections.keys())
-    console.log("=================socket=================");
+  public setQueueViewNamespace(namespace: any): void {
+    this.queueViewNamespace = namespace;
+  }
 
-    if (this.queue.includes(userId)) {
+  public setWinnerPriority(userId: number, color: string): void {
+    const expiresAt = Date.now() + this.WINNER_DECISION_TIMEOUT;
+    this.winnerPriority.set(userId, { color, expiresAt });
+    console.log(`🏆 Winner ${userId} has priority for ${color} until ${new Date(expiresAt).toISOString()}`);
+  }
+
+  public clearWinnerPriority(userId: number): void {
+    this.winnerPriority.delete(userId);
+    console.log(`🏆 Cleared winner priority for ${userId}`);
+  }
+
+  public hasWinnerPriority(userId: number): boolean {
+    const priority = this.winnerPriority.get(userId);
+    if (!priority) return false;
+    
+    if (Date.now() > priority.expiresAt) {
+      this.clearWinnerPriority(userId);
+      return false;
+    }
+    return true;
+  }
+  
+  public getQueueState() {
+    const allPlayers: any[] = [];
+    let position = 1;
+    
+    for (const [color, queue] of this.colorQueues.entries()) {
+      for (const userId of queue) {
+        allPlayers.push({
+          userId,
+          color,
+          position: position++
+        });
+      }
+    }
+
+    // Check if at least one player is in queue (to enable start button)
+    this.canStartGame = allPlayers.length > 0;
+
+    return {
+      players: allPlayers,
+      total: allPlayers.length,
+      canStartGame: this.canStartGame,
+      colorQueueCounts: {
+        red: this.colorQueues.get('red')?.length || 0,
+        brown: this.colorQueues.get('brown')?.length || 0,
+        blue: this.colorQueues.get('blue')?.length || 0,
+        green: this.colorQueues.get('green')?.length || 0,
+      }
+    };
+  }
+
+  public broadcastQueueUpdate(): void {
+    const queueState = this.getQueueState();
+    
+    this.socketConnections.forEach((socket) => {
+      socket.emit("QUEUE_STATE", queueState);
+    });
+    
+    if (this.queueViewNamespace) {
+      this.queueViewNamespace.emit("QUEUE_STATE", queueState);
+    }
+  }
+
+  async addToQueue(userId: number, color: string, socket: Socket): Promise<void> {
+    if (!VALID_COLORS.includes(color)) {
+      socket.emit('ERROR', { message: `Invalid color. Choose one of: ${VALID_COLORS.join(', ')}` });
+      return;
+    }
+
+    this.socketConnections.set(userId, socket);
+    console.log(`Adding user ${userId} to ${color} queue`);
+
+    // Check if user is already in any queue
+    const alreadyInQueue = this.isUserInQueue(userId);
+    if (alreadyInQueue) {
       console.log(`⚠️ User ${userId} already in queue, socket connection updated`);
       return;
     }
@@ -47,22 +123,12 @@ export class GameQueueService {
       clearTimeout(existingTimer);
       this.queueTimers.delete(userId);
     }
-  
-    const isNextGame = this.nextgamequeue.includes(userId);
-    
-    if (isNextGame) {
-      const storedColor = this.nextplayersColors.get(userId);
-      if (storedColor) {
-        this.playerColors.set(userId, storedColor);
-      }
-  
-      this.queue.unshift(userId);
-      this.nextgamequeue = this.nextgamequeue.filter(id => id !== userId);
-      this.nextplayersColors.delete(userId);
-      console.log(`🔄 Next game player ${userId} added to front of queue`);
-    } else {
-      this.queue.push(userId);
-      console.log(`➕ Regular player ${userId} added to back of queue`);
+
+    // Add to the specific color queue
+    const colorQueue = this.colorQueues.get(color);
+    if (colorQueue) {
+      colorQueue.push(userId);
+      this.playerColors.set(userId, color);
     }
   
     await prisma.profile.updateMany({
@@ -70,133 +136,185 @@ export class GameQueueService {
       data: { looking: true }
     });
   
-    console.log(`📊 Queue status: ${this.queue.length} players:`, this.queue);
-    console.log(`🎨 Colors assigned:`, Array.from(this.playerColors.entries()));
+    const queueState = this.getQueueState();
+    console.log(`📊 Queue status:`, queueState);
   
     socket.emit('QUEUED', {
-      remaining: Math.max(0, PLAYERS_REQUIRED - this.queue.length),
+      message: 'Waiting for game to start',
     });
   
     socket.emit('QUEUE_UPDATE', {
-      position: this.queue.indexOf(userId) + 1,
-      total: this.queue.length,
-      takenColors: Array.from(this.playerColors.values())
+      position: queueState.players.find(p => p.userId === userId)?.position,
+      total: queueState.total,
+      colorQueueCounts: queueState.colorQueueCounts,
+      canStartGame: queueState.canStartGame
     });
+
+    this.broadcastQueueUpdate();
   
     const timer = setTimeout(async () => {
       await this.handleQueueTimeout(userId);
     }, QUEUE_TIMEOUT_MS);
     this.queueTimers.set(userId, timer);
-  
-    if (this.queue.length >= PLAYERS_REQUIRED) {
-      console.log(`🎮 Queue full (${this.queue.length}/${PLAYERS_REQUIRED}), attempting to start game...`);
-      await this.tryStartGame();
-    }
   }
+
+  // NEW: Generate a bot name
+  private generateBotName(): string {
+    const botNumber = Math.floor(Math.random() * 107) + 1;
+    return `mooshi-${botNumber}`;
+  }
+
+  // NEW: Manual game start with randomized selection
+  public async startGameManually(): Promise<{
+    gameSessionId: string;
+    players: Array<{
+      userId: number;
+      username: string;
+      color: string;
+      isBot: boolean;
+    }>;
+  }> {
+    console.log(`🎮 Manual game start initiated`);
+    
+    const selectedPlayers: Array<{
+      userId: number;
+      username: string;
+      color: string;
+      isBot: boolean;
+    }> = [];
+    
+    // For each color, randomly select one player or create a bot
+    for (const color of VALID_COLORS) {
+      const colorQueue = this.colorQueues.get(color);
+      
+      if (!colorQueue || colorQueue.length === 0) {
+        // No players for this color - create a bot
+        const botId = -(this.botCounter++); // Negative IDs for bots
+        const botName = this.generateBotName();
+        
+        selectedPlayers.push({
+          userId: botId,
+          username: botName,
+          color: color,
+          isBot: true
+        });
+        
+        console.log(`🤖 No players for ${color}, added bot: ${botName}`);
+      } else {
+        // Randomly select one player from this color queue
+        const randomIndex = Math.floor(Math.random() * colorQueue.length);
+        const selectedUserId = colorQueue[randomIndex];
+        
+        selectedPlayers.push({
+          userId: selectedUserId,
+          username: `Player${selectedUserId}`,
+          color: color,
+          isBot: false
+        });
+        
+        console.log(`✅ Randomly selected player ${selectedUserId} from ${color} queue (${colorQueue.length} players)`);
+      }
+    }
+
+    console.log(`🚀 Starting game with players:`, selectedPlayers);
+    
+    // Extract only real player IDs for game session
+    const realPlayerIds = selectedPlayers
+      .filter(p => !p.isBot)
+      .map(p => p.userId);
+    
+    // Clear timers and remove from queues for real players
+    realPlayerIds.forEach(pid => {
+      const timer = this.queueTimers.get(pid);
+      if (timer) clearTimeout(timer);
+      this.queueTimers.delete(pid);
+      this.playersInGame.add(pid);
+    });
   
+    // Remove selected real players from color queues
+    for (const [color, queue] of this.colorQueues.entries()) {
+      this.colorQueues.set(color, queue.filter(id => !realPlayerIds.includes(id)));
+    }
+
+    // Create game session (only store real players in DB)
+    const gameSession = await prisma.gameSession.create({
+      data: {
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+        players: {
+          create: realPlayerIds.map(id => ({ profile: { connect: { id } } }))
+        }
+      },
+      include: { players: { include: { profile: true } } }
+    });
   
-  public async forceRemoveFromQueue(userId: number): Promise<void> {
-    const index = this.queue.indexOf(userId);
-    if (index !== -1) {
-      this.queue.splice(index, 1);
-      console.log(`Force removed user ${userId} from queue`);
+    await prisma.profile.updateMany({
+      where: { id: { in: realPlayerIds } },
+      data: { looking: false, isonrand: true }
+    });
+  
+    // Emit GAME_STARTED to all real players
+    selectedPlayers.forEach(player => {
+      if (!player.isBot) {
+        const socket = this.socketConnections.get(player.userId);
+        if (socket) {
+          socket.emit('GAME_STARTED', {
+            gameSessionId: gameSession.id,
+            players: selectedPlayers.map(p => ({
+              id: p.userId,
+              username: p.username,
+              color: p.color,
+              isBot: p.isBot
+            }))
+          });
+        }
+      }
+    });
+    
+    console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
+    console.log(`📊 Remaining queues:`, {
+      red: this.colorQueues.get('red')?.length || 0,
+      brown: this.colorQueues.get('brown')?.length || 0,
+      blue: this.colorQueues.get('blue')?.length || 0,
+      green: this.colorQueues.get('green')?.length || 0,
+    });
+
+    this.broadcastQueueUpdate();
+    
+    return {
+      gameSessionId: gameSession.id,
+      players: selectedPlayers
+    };
+  }
+
+  async removeFromQueue(userId: number): Promise<void> {
+    // Remove from all color queues
+    for (const [color, queue] of this.colorQueues.entries()) {
+      const index = queue.indexOf(userId);
+      if (index !== -1) {
+        queue.splice(index, 1);
+        console.log(`Removed user ${userId} from ${color} queue`);
+      }
     }
   
     const timer = this.queueTimers.get(userId);
-    if (timer) {
-      clearTimeout(timer);
-      this.queueTimers.delete(userId);
+    if (timer) clearTimeout(timer);
+    this.queueTimers.delete(userId);
+  
+    if (!this.playersInGame.has(userId)) {
+      this.socketConnections.delete(userId);
+      this.playerColors.delete(userId);
+      console.log("Removed socket and color for user not in game:", userId);
+    } else {
+      console.log("Keeping socket and color for player in game:", userId);
     }
   
     await prisma.profile.updateMany({
       where: { id: userId },
       data: { looking: false }
     });
-  }
 
-  public async tryStartGame(): Promise<void> {
-    console.log(`🎮 Trying to start game with queue:`, this.queue);
-    console.log(`🎨 Player colors:`, this.playerColors);
-    console.log(`🔌 Socket connections:`, Array.from(this.socketConnections.keys()));
-    
-    if (this.queue.length < PLAYERS_REQUIRED) {
-      console.log(`❌ Not enough players in queue: ${this.queue.length}/${PLAYERS_REQUIRED}`);
-      return;
-    }
-  
-    const uniqueColorPlayers: number[] = [];
-    const seenColors: Set<string> = new Set();
-  
-    for (const uid of this.queue) {
-      const color = this.playerColors.get(uid);
-      const hasSocket = this.socketConnections.has(uid);
-      
-      console.log(`🔍 Checking player ${uid} - color: ${color}, hasSocket: ${hasSocket}`);
-      
-      if (!color) {
-        console.log(`⚠️ Player ${uid} has no color assigned, skipping`);
-        continue;
-      }
-      
-      if (!hasSocket) {
-        console.log(`⚠️ Player ${uid} has no socket connection, skipping`);
-        continue;
-      }
-      
-      if (seenColors.has(color)) {
-        console.log(`⚠️ Color ${color} already taken by another player, skipping player ${uid}`);
-        continue;
-      }
-  
-      seenColors.add(color);
-      uniqueColorPlayers.push(uid);
-      console.log(`✅ Player ${uid} added with unique color ${color}`);
-  
-      if (uniqueColorPlayers.length === PLAYERS_REQUIRED) break;
-    }
-  
-    console.log(`🎯 Unique color players with sockets: ${uniqueColorPlayers.length}/${PLAYERS_REQUIRED}`);
-  
-    if (uniqueColorPlayers.length === PLAYERS_REQUIRED) {
-      console.log(`🚀 Starting game with players:`, uniqueColorPlayers);
-      await this.startGameSession(uniqueColorPlayers);
-    } else {
-      console.log(`❌ Not enough valid players: ${uniqueColorPlayers.length}/${PLAYERS_REQUIRED}`);
-      
-      this.queue.forEach((uid) => {
-        const socket = this.socketConnections.get(uid);
-        if (socket) {
-          socket.emit("ERROR", { 
-            message: `Waiting for more players with unique colors and active connections. Currently ${uniqueColorPlayers.length}/${PLAYERS_REQUIRED} valid players.` 
-          });
-        }
-      });
-    }
-  }
-  
-  
-  async removeFromQueue(userId: number): Promise<void> {
-    const index = this.queue.indexOf(userId);
-    if (index !== -1) {
-      this.queue.splice(index, 1);
-  
-      const timer = this.queueTimers.get(userId);
-      if (timer) clearTimeout(timer);
-      this.queueTimers.delete(userId);
-  
-      if (!this.playersInGame.has(userId)) {
-        this.socketConnections.delete(userId);
-        console.log("removing socket and color for user not in game:", userId);
-        this.playerColors.delete(userId);
-      } else {
-        console.log("keeping socket and color for player in game:", userId);
-      }
-  
-      await prisma.profile.updateMany({
-        where: { id: userId },
-        data: { looking: false }
-      });
-    }
+    this.broadcastQueueUpdate();
   }
 
   private async handleQueueTimeout(userId: number): Promise<void> {
@@ -205,72 +323,6 @@ export class GameQueueService {
     if (socket) {
       socket.emit('QUEUE_TIMEOUT', { message: 'Queue time expired' });
     }
-  }
-
-  public async startGameSession(selectedPlayers: number[]): Promise<void> {
-    selectedPlayers.forEach(pid => {
-      const timer = this.queueTimers.get(pid);
-      if (timer) clearTimeout(timer);
-      this.queueTimers.delete(pid);
-    });
-  
-    selectedPlayers.forEach(pid => {
-      this.playersInGame.add(pid);
-    });
-  
-    const playerRecords = await prisma.profile.findMany({
-      where: { id: { in: selectedPlayers } },
-      select: { id: true, username: true }
-    });
-  
-    const gameSession = await prisma.gameSession.create({
-      data: {
-        status: 'IN_PROGRESS',
-        startedAt: new Date(),
-        players: {
-          create: selectedPlayers.map(id => ({ profile: { connect: { id } } }))
-        }
-      },
-      include: { players: { include: { profile: true } } }
-    });
-  
-    const inMemoryGame: InMemoryGame = {
-      board: Array.from({ length: 7 }, () => Array(7).fill(null)),
-      players: playerRecords.map(p => ({
-        ...p,
-        color: this.playerColors.get(p.id)
-      })),
-      currentTurnIndex: 0,
-      status: 'in_progress'
-    };
-  
-    this.activeSessions.set(gameSession.id, inMemoryGame);
-  
-    await prisma.profile.updateMany({
-      where: { id: { in: selectedPlayers } },
-      data: { looking: false, isonrand: true }
-    });
-  
-    selectedPlayers.forEach(pid => {
-      const socket = this.socketConnections.get(pid);
-      if (socket) {
-        socket.emit('GAME_STARTED', {
-          gameSessionId: gameSession.id,
-          players: inMemoryGame.players.map(p => ({
-            id: p.id,
-            username: p.username,
-            color: p.color
-          }))
-        });
-      } else {
-        console.warn(`⚠️ No socket connection for player ${pid} when starting game`);
-      }
-    });
-    
-    this.queue = this.queue.filter(uid => !selectedPlayers.includes(uid));
-    
-    console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
-    console.log(`📊 Remaining queue:`, this.queue);
   }
 
   public cleanupStaleConnections(): void {
@@ -284,100 +336,49 @@ export class GameQueueService {
 
   public debugQueueState(): void {
     console.log('🔍 === QUEUE DEBUG STATE ===');
-    console.log('Queue:', this.queue);
+    console.log('Color Queues:');
+    for (const [color, queue] of this.colorQueues.entries()) {
+      console.log(`  ${color}:`, queue);
+    }
     console.log('Player Colors:', Array.from(this.playerColors.entries()));
     console.log('Socket Connections:', Array.from(this.socketConnections.keys()));
     console.log('Players In Game:', Array.from(this.playersInGame));
-    console.log('Next Game Queue:', this.nextgamequeue);
-    console.log('Next Players Colors:', Array.from(this.nextplayersColors.entries()));
     console.log('Winners Wanting Next:', Array.from(this.winnersWantingNext));
+    console.log('Can Start Game:', this.canStartGame);
     console.log('=========================');
-  }
-  
-
-  async handleClaimSquare(userId: number, gameId: string, row: number, col: number): Promise<void> {
-    const game = this.activeSessions.get(gameId);
-    if (!game || game.status !== 'in_progress') return;
-
-    const player = game.players[game.currentTurnIndex];
-    if (player.id !== userId) {
-      const socket = this.socketConnections.get(userId);
-      if (socket) socket.emit('ERROR', { message: 'Not your turn' });
-      return;
-    }
-
-    if (game.board[row][col] !== null) return;
-
-    game.board[row][col] = userId;
-
-    const flatBoard = game.board.flat();
-    if (flatBoard.every(cell => cell !== null)) {
-      game.status = 'ended';
-      game.winnerId = userId;
-
-      game.players.forEach(p => {
-        const socket = this.socketConnections.get(p.id);
-        if (socket) socket.emit('gameEnded', { winnerId: userId });
-      });
-      return;
-    }
-
-    game.currentTurnIndex = (game.currentTurnIndex + 1) % game.players.length;
-
-    game.players.forEach(p => {
-      const socket = this.socketConnections.get(p.id);
-      if (socket) {
-        socket.emit('GAME_STATE', {
-          board: game.board,
-          currentTurnIndex: game.currentTurnIndex,
-          players: game.players.map(pl => ({
-            id: pl.id,
-            username: pl.username,
-            color: pl.color
-          }))
-        });
-      }
-    });
   }
 
   async getQueueStatus(userId: number): Promise<{ position: number; total: number }> {
-    const position = this.queue.indexOf(userId);
-    if (position === -1) throw new Error('User not in queue');
-    return { position: position + 1, total: this.queue.length };
+    const queueState = this.getQueueState();
+    const playerData = queueState.players.find(p => p.userId === userId);
+    
+    if (!playerData) {
+      return { position: 0, total: queueState.total };
+    }
+    
+    return { 
+      position: playerData.position, 
+      total: queueState.total 
+    };
   }
 
-  handleColorSelection(userId: number, selectedColor: string, forceAssign = false): boolean {
-    const taken = new Set(this.queue.map(id => this.playerColors.get(id)).filter(Boolean));
-  
-    if (taken.has(selectedColor) && !forceAssign) {
+  handleColorSelection(userId: number, selectedColor: string): boolean {
+    if (!VALID_COLORS.includes(selectedColor)) {
       const socket = this.socketConnections.get(userId);
       if (socket) {
-        socket.emit('COLOR_TAKEN', { color: selectedColor });
-      }
-  
-      this.nextplayersColors.set(userId, selectedColor);
-  
-      if (!this.nextgamequeue.includes(userId)) {
-        this.nextgamequeue.push(userId);
-        console.log(`User ${userId} added to nextgamequeue.`);
+        socket.emit('ERROR', { 
+          message: `Invalid color. Choose one of: ${VALID_COLORS.join(', ')}` 
+        });
       }
       return false;
     }
-  
-    this.playerColors.set(userId, selectedColor);
-    this.nextplayersColors.delete(userId);
-  
+
     const socket = this.socketConnections.get(userId);
     if (socket) {
       socket.emit('COLOR_CONFIRMED', { color: selectedColor });
     }
     return true;
   }
-
-  
-  
-  
-  
 
   onColorSelect(socket: Socket): void {
     socket.on('COLOR_SELECT', ({ userId, color }) => {
