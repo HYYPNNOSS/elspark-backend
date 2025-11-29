@@ -166,7 +166,7 @@ export class GameQueueService {
 
   // NEW: Manual game start with randomized selection
   public async startGameManually(): Promise<{
-    gameSessionId: string;
+    gameSessionId: number;
     players: Array<{
       userId: number;
       username: string;
@@ -247,28 +247,16 @@ export class GameQueueService {
       },
       include: { players: { include: { profile: true } } }
     });
+
+    console.log("✅ Game session created:", {
+      id: gameSession.id,
+      idType: typeof gameSession.id,
+      status: gameSession.status
+    });
   
     await prisma.profile.updateMany({
       where: { id: { in: realPlayerIds } },
       data: { looking: false, isonrand: true }
-    });
-  
-    // Emit GAME_STARTED to all real players
-    selectedPlayers.forEach(player => {
-      if (!player.isBot) {
-        const socket = this.socketConnections.get(player.userId);
-        if (socket) {
-          socket.emit('GAME_STARTED', {
-            gameSessionId: gameSession.id,
-            players: selectedPlayers.map(p => ({
-              id: p.userId,
-              username: p.username,
-              color: p.color,
-              isBot: p.isBot
-            }))
-          });
-        }
-      }
     });
     
     console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
@@ -280,9 +268,12 @@ export class GameQueueService {
     });
 
     this.broadcastQueueUpdate();
+
+    const numericId = Number(gameSession.id);
+    console.log("🎮 Returning game session ID:", numericId, "type:", typeof numericId);
     
     return {
-      gameSessionId: gameSession.id,
+      gameSessionId: numericId,
       players: selectedPlayers
     };
   }

@@ -232,10 +232,11 @@ export function setupGameWebSocket(io: Server) {
     console.log(`🏁 Round ${session.round} winner: Player ${roundWinner}`);
     session.roundWinners.push(roundWinner);
   
-    gameNamespace.to(session.id.toString()).emit("ROUND_OVER", {
+    gameNamespace.to(sessionId.toString()).emit("ROUND_OVER", {
       round: session.round,
       winnerId: roundWinner,
       tied,
+      sessionId: sessionId
     });
   
     if (session.round >= 3) {
@@ -419,8 +420,18 @@ export function setupGameWebSocket(io: Server) {
         
         const { gameSessionId, players } = result;
         
+        const numericSessionId = Number(gameSessionId);
+        
+        if (isNaN(numericSessionId)) {
+          console.error("❌ Invalid gameSessionId received:", gameSessionId);
+          socket.emit("ERROR", { message: "Failed to create game session" });
+          return;
+        }
+
+        console.log("✅ Starting game with session ID:", numericSessionId, "type:", typeof numericSessionId);
+        
         const boardSession: InMemoryGameSession = {
-          id: Number(gameSessionId),
+          id: numericSessionId,
           board: createEmptyBoard(),
           players: players.map((p: any) => ({
             userId: p.userId,
@@ -438,25 +449,38 @@ export function setupGameWebSocket(io: Server) {
           roundWinners: []
         };
 
-        // Use `as any` since gameSessionId could be string or number; ensure key is string for object index
-        (boardSessions as Record<string, InMemoryGameSession>)[String(gameSessionId)] = boardSession;
+        boardSessions[numericSessionId] = boardSession;
+
+        console.log("✅ boardSessions after insert:", Object.keys(boardSessions));
 
         // Set player colors for all players (including bots)
-        players.forEach((p: { userId: number; color: string; isBot: boolean; }) => {
+        players.forEach((p: { userId: number; color: string; isBot: boolean; username: string }) => {
           gameQueueService.playerColors.set(p.userId, p.color);
 
           // Join human players to the Socket.IO room
           if (!p.isBot) {
             const playerSocket = gameQueueService.socketConnections.get(p.userId);
             if (playerSocket) {
-              playerSocket.join(gameSessionId.toString());
-              console.log(`👥 Player ${p.userId} joined room ${gameSessionId}`);
+              playerSocket.join(numericSessionId.toString());
+              
+              // Emit with explicit numeric ID
+              playerSocket.emit('GAME_STARTED', {
+                gameSessionId: numericSessionId,
+                players: players.map((pl: any) => ({
+                  id: pl.userId,
+                  username: pl.username,
+                  color: pl.color,
+                  isBot: pl.isBot
+                }))
+              });
+              
+              console.log(`✅ Emitted GAME_STARTED to player ${p.userId} with sessionId:`, numericSessionId);
             }
           }
         });
 
         // Emit initial game state
-        emitGameState(Number(gameSessionId));
+        emitGameState(numericSessionId);
 
       } catch (error) {
         console.error("Error starting game manually:", error);
@@ -516,10 +540,11 @@ export function setupGameWebSocket(io: Server) {
     });
 
     socket.on("PLAYER_MOVE", async ({ sessionId, row, col, color }) => {
-      const numericSessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+      const numericSessionId = Number(sessionId);
       const session = boardSessions[numericSessionId];
+      
       if (!session) {
-        console.log(`⚠️ Session ${sessionId} not found`);
+        console.log(`⚠️ Session ${sessionId} not found in boardSessions. Available:`, Object.keys(boardSessions));
         return;
       }
     
@@ -621,7 +646,7 @@ export function setupGameWebSocket(io: Server) {
     });
 
     socket.on("forceEndRound", async ({ sessionId }) => {
-      const numericSessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+      const numericSessionId = Number(sessionId);
       const session = boardSessions[numericSessionId];
       if (!session) return;
       

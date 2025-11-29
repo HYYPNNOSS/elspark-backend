@@ -1,43 +1,53 @@
-/*
-  Warnings:
-
-  - The primary key for the `BotInGame` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - You are about to alter the column `id` on the `BotInGame` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-  - You are about to alter the column `gameSessionId` on the `BotInGame` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-  - The primary key for the `GameSession` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - You are about to alter the column `id` on the `GameSession` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-  - You are about to alter the column `winnerId` on the `GameSession` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-  - The primary key for the `PlayerInGame` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - You are about to alter the column `id` on the `PlayerInGame` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-  - You are about to alter the column `gameSessionId` on the `PlayerInGame` table. The data in that column could be lost. The data in that column will be cast from `VarChar(191)` to `Int`.
-
-*/
--- DropForeignKey
+-- Step 1: Drop foreign key constraints first
+ALTER TABLE `PlayerInGame` DROP FOREIGN KEY `PlayerInGame_gameSessionId_fkey`;
 ALTER TABLE `BotInGame` DROP FOREIGN KEY `BotInGame_gameSessionId_fkey`;
 
--- DropForeignKey
-ALTER TABLE `PlayerInGame` DROP FOREIGN KEY `PlayerInGame_gameSessionId_fkey`;
+-- Step 2: Drop the dependent tables
+DROP TABLE IF EXISTS `PlayerInGame`;
+DROP TABLE IF EXISTS `BotInGame`;
 
--- AlterTable
-ALTER TABLE `BotInGame` DROP PRIMARY KEY,
-    MODIFY `id` INTEGER NOT NULL AUTO_INCREMENT,
-    MODIFY `gameSessionId` INTEGER NOT NULL,
-    ADD PRIMARY KEY (`id`);
+-- Step 3: Drop GameSession table
+DROP TABLE IF EXISTS `GameSession`;
 
--- AlterTable
-ALTER TABLE `GameSession` DROP PRIMARY KEY,
-    MODIFY `id` INTEGER NOT NULL AUTO_INCREMENT,
-    MODIFY `winnerId` INTEGER NULL,
-    ADD PRIMARY KEY (`id`);
+-- Step 4: Recreate GameSession with Int ID
+CREATE TABLE `GameSession` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `status` ENUM('WAITING', 'IN_PROGRESS', 'COMPLETED', 'ABANDONED') NOT NULL DEFAULT 'WAITING',
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `startedAt` DATETIME(3) NULL,
+    `endedAt` DATETIME(3) NULL,
+    `winnerId` INTEGER NULL,
+    `boardState` JSON NULL,
+    `currentTurn` INTEGER NULL,
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- AlterTable
-ALTER TABLE `PlayerInGame` DROP PRIMARY KEY,
-    MODIFY `id` INTEGER NOT NULL AUTO_INCREMENT,
-    MODIFY `gameSessionId` INTEGER NOT NULL,
-    ADD PRIMARY KEY (`id`);
+-- Step 5: Recreate PlayerInGame
+CREATE TABLE `PlayerInGame` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `gameSessionId` INTEGER NOT NULL,
+    `profileId` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE INDEX `PlayerInGame_gameSessionId_profileId_key`(`gameSessionId`, `profileId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- AddForeignKey
-ALTER TABLE `PlayerInGame` ADD CONSTRAINT `PlayerInGame_gameSessionId_fkey` FOREIGN KEY (`gameSessionId`) REFERENCES `GameSession`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+-- Step 6: Recreate BotInGame
+CREATE TABLE `BotInGame` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `gameSessionId` INTEGER NOT NULL,
+    `botId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE INDEX `BotInGame_gameSessionId_botId_key`(`gameSessionId`, `botId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- AddForeignKey
-ALTER TABLE `BotInGame` ADD CONSTRAINT `BotInGame_gameSessionId_fkey` FOREIGN KEY (`gameSessionId`) REFERENCES `GameSession`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+-- Step 7: Add foreign keys back
+ALTER TABLE `PlayerInGame` ADD CONSTRAINT `PlayerInGame_gameSessionId_fkey` 
+    FOREIGN KEY (`gameSessionId`) REFERENCES `GameSession`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+ALTER TABLE `PlayerInGame` ADD CONSTRAINT `PlayerInGame_profileId_fkey` 
+    FOREIGN KEY (`profileId`) REFERENCES `profiles`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE `BotInGame` ADD CONSTRAINT `BotInGame_gameSessionId_fkey` 
+    FOREIGN KEY (`gameSessionId`) REFERENCES `GameSession`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
