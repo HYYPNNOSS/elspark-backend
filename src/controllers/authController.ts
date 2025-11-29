@@ -255,6 +255,14 @@ export const signin = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "All fields are required" });
   }
 
+  const existing = await prisma.account.findUnique({
+    where: { email },
+  });
+  
+  if (existing) {
+    return res.status(409).json({ error: "User already exists" });
+  }
+
   try {
     const account = await prisma.account.findUnique({
       where: { email },
