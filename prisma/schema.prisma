@@ -116,12 +116,12 @@ model GameStats {
 }
 
 model GameSession {
-  id         String         @id @default(uuid())
+  id         Int            @id @default(autoincrement())
   status     GameStatus     @default(WAITING)
   createdAt  DateTime       @default(now())
   startedAt  DateTime?
   endedAt    DateTime?
-  winnerId   String?
+  winnerId   Int?
   players    PlayerInGame[]
   botPlayers BotInGame[]
 
@@ -130,9 +130,9 @@ model GameSession {
 }
 
 model PlayerInGame {
-  id            String      @id @default(uuid())
+  id            Int         @id @default(autoincrement())
   gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
-  gameSessionId String
+  gameSessionId Int
   profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
   profileId     Int
   createdAt     DateTime    @default(now())
@@ -141,9 +141,9 @@ model PlayerInGame {
 }
 
 model BotInGame {
-  id            String      @id @default(uuid())
+  id            Int         @id @default(autoincrement())
   gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
-  gameSessionId String
+  gameSessionId Int
   botId         String
   createdAt     DateTime    @default(now())
 

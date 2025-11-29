@@ -5,13 +5,14 @@ import { gameQueueService } from "../services/gameQueue.service";
 const prisma = new PrismaClient();
 
 interface InMemoryGameSession {
-  id: string;
+  id: number;
   board: string[][];
   players: { 
     userId: number; 
     socketId: string;
     isBot?: boolean;
     username?: string;
+    cumulativeScore?: number;
   }[];
   currentTurn: number;
   status: string;
@@ -22,7 +23,8 @@ interface InMemoryGameSession {
   roundWinners: number[];
 }
 
-const boardSessions: Record<string, InMemoryGameSession> = {};
+const boardSessions: Record<number, InMemoryGameSession> = {};
+
 
 function createEmptyBoard(rows = 7, cols = 7): string[][] {
   const board = Array.from({ length: rows }, () => Array(cols).fill(""));
@@ -109,7 +111,8 @@ export function setupGameWebSocket(io: Server) {
   gameQueueService.setQueueViewNamespace(queueViewNamespace);
 
   // NEW: Bot move handler
-  function handleBotMove(sessionId: string, session: InMemoryGameSession) {
+  function handleBotMove(sessionId: number, session: InMemoryGameSession) {
+
     const currentPlayer = session.players[session.currentTurn];
     
     if (!currentPlayer.isBot) {
@@ -189,9 +192,10 @@ export function setupGameWebSocket(io: Server) {
     }, 1000); // 1 second delay for bot moves
   }
 
-  async function handleForceEndRound(sessionId: string, session: InMemoryGameSession) {
+  async function handleForceEndRound(sessionId: number, session: InMemoryGameSession) {
     const { board, players } = session;
   
+    // Calculate current round scores
     const playerTileCounts: Record<number, number> = {};
     for (const row of board) {
       for (const cell of row) {
@@ -201,6 +205,13 @@ export function setupGameWebSocket(io: Server) {
         }
       }
     }
+  
+    // UPDATE CUMULATIVE SCORES FOR EACH PLAYER
+    session.players.forEach(player => {
+      const roundScore = playerTileCounts[player.userId] || 0;
+      player.cumulativeScore = (player.cumulativeScore || 0) + roundScore;
+      console.log(`📊 Player ${player.userId} - Round ${session.round} score: ${roundScore}, Cumulative: ${player.cumulativeScore}`);
+    });
   
     const entries = Object.entries(playerTileCounts);
     if (entries.length === 0) return;
@@ -221,7 +232,7 @@ export function setupGameWebSocket(io: Server) {
     console.log(`🏁 Round ${session.round} winner: Player ${roundWinner}`);
     session.roundWinners.push(roundWinner);
   
-    gameNamespace.to(session.id).emit("ROUND_OVER", {
+    gameNamespace.to(session.id.toString()).emit("ROUND_OVER", {
       round: session.round,
       winnerId: roundWinner,
       tied,
@@ -244,19 +255,21 @@ export function setupGameWebSocket(io: Server) {
   
       console.log(`🏆 Game over — Final winner: Player ${gameWinner}`);
   
-      // Calculate final rankings
+      // Calculate final rankings using CUMULATIVE SCORES
       const finalRankings = session.players.map(player => {
-        const score = playerTileCounts[player.userId] || 0;
+        const cumulativeScore = player.cumulativeScore || 0; // USE CUMULATIVE
         const roundWins = session.roundWinners.filter(id => id === player.userId).length;
         return {
           userId: player.userId,
           username: player.username || `Player${player.userId}`,
           color: gameQueueService.playerColors.get(player.userId),
-          score,
+          score: cumulativeScore, // THIS IS NOW CUMULATIVE
           roundWins,
           isBot: player.isBot || false
         };
       }).sort((a, b) => b.score - a.score);
+  
+      console.log(`📊 Final Rankings with Cumulative Scores:`, finalRankings);
   
       // Emit match results to all players AND spectators
       gameNamespace.emit("MATCH_RESULTS", {
@@ -300,18 +313,20 @@ export function setupGameWebSocket(io: Server) {
           }
         }
   
-        // Reset session
+        // Reset session - RESET CUMULATIVE SCORES TOO
         session.round = 1;
         session.board = createEmptyBoard();
         session.currentTurn = 0;
         session.firstTurnMoves.clear();
         session.roundWinners = [];
+        session.players.forEach(p => p.cumulativeScore = 0); // RESET SCORES
       }, 10000);
   
     } else {
+      // Move to next round
       session.round += 1;
       session.board = createEmptyBoard();
-      session.currentTurn = 0;
+      session.currentTurn = Math.floor(Math.random() * session.players.length);
       session.firstTurnMoves.clear();
       emitGameState(sessionId);
     }
@@ -381,7 +396,7 @@ export function setupGameWebSocket(io: Server) {
       }
     });
 
-    // NEW: Manual game start handler
+    // Manual game start handler
     socket.on("START_GAME_MANUALLY", async () => {
       console.log(`🎮 Manual game start requested by user ${userId}`);
       
@@ -405,15 +420,16 @@ export function setupGameWebSocket(io: Server) {
         const { gameSessionId, players } = result;
         
         const boardSession: InMemoryGameSession = {
-          id: gameSessionId,
+          id: Number(gameSessionId),
           board: createEmptyBoard(),
           players: players.map((p: any) => ({
             userId: p.userId,
             socketId: p.isBot ? `bot-${p.userId}` : gameQueueService.socketConnections.get(p.userId)?.id || '',
             isBot: p.isBot,
-            username: p.username
+            username: p.username,
+            cumulativeScore: 0 
           })),
-          currentTurn: 0,
+          currentTurn: Math.floor(Math.random() * players.length),
           status: "IN_PROGRESS",
           startedAt: new Date(),
           endedAt: null,
@@ -421,17 +437,27 @@ export function setupGameWebSocket(io: Server) {
           round: 1,
           roundWinners: []
         };
-        
-        boardSessions[gameSessionId] = boardSession;
-        
+
+        // Use `as any` since gameSessionId could be string or number; ensure key is string for object index
+        (boardSessions as Record<string, InMemoryGameSession>)[String(gameSessionId)] = boardSession;
+
         // Set player colors for all players (including bots)
-        players.forEach((p: any) => {
+        players.forEach((p: { userId: number; color: string; isBot: boolean; }) => {
           gameQueueService.playerColors.set(p.userId, p.color);
+
+          // Join human players to the Socket.IO room
+          if (!p.isBot) {
+            const playerSocket = gameQueueService.socketConnections.get(p.userId);
+            if (playerSocket) {
+              playerSocket.join(gameSessionId.toString());
+              console.log(`👥 Player ${p.userId} joined room ${gameSessionId}`);
+            }
+          }
         });
-        
+
         // Emit initial game state
-        emitGameState(gameSessionId);
-        
+        emitGameState(Number(gameSessionId));
+
       } catch (error) {
         console.error("Error starting game manually:", error);
         socket.emit("ERROR", { message: "Failed to start game" });
@@ -490,8 +516,12 @@ export function setupGameWebSocket(io: Server) {
     });
 
     socket.on("PLAYER_MOVE", async ({ sessionId, row, col, color }) => {
-      const session = boardSessions[sessionId];
-      if (!session) return;
+      const numericSessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+      const session = boardSessions[numericSessionId];
+      if (!session) {
+        console.log(`⚠️ Session ${sessionId} not found`);
+        return;
+      }
     
       const playerIndex = session.players.findIndex((p) => p.userId === userId);
     
@@ -533,14 +563,14 @@ export function setupGameWebSocket(io: Server) {
     
         if (!foundValidPlayer && allPlayersMoved) {
           console.log("🏁 No players have valid moves - forcing round end");
-          await handleForceEndRound(sessionId, session);
+          await handleForceEndRound(numericSessionId, session);
           return;
         } else if (!foundValidPlayer && !allPlayersMoved) {
           console.error("⚠️ ERROR: No valid player found during first moves phase!");
           return;
         }
     
-        emitGameState(sessionId);
+        emitGameState(numericSessionId);
       }
     });
 
@@ -591,10 +621,11 @@ export function setupGameWebSocket(io: Server) {
     });
 
     socket.on("forceEndRound", async ({ sessionId }) => {
-      const session = boardSessions[sessionId];
+      const numericSessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+      const session = boardSessions[numericSessionId];
       if (!session) return;
       
-      await handleForceEndRound(sessionId, session);
+      await handleForceEndRound(numericSessionId, session);
     });
 
     socket.on("REQUEST_SPECTATOR_VIEW", ({ userId }) => {
@@ -636,7 +667,7 @@ export function setupGameWebSocket(io: Server) {
     gameQueueService.cleanupStaleConnections();
   }, 90000);
 
-  function emitGameState(sessionId: string) {
+  function emitGameState(sessionId: number) {
     const session = boardSessions[sessionId];
     if (!session) return;
   
@@ -659,9 +690,11 @@ export function setupGameWebSocket(io: Server) {
         id: p.userId,
         username: p.username || `Player${p.userId}`,
         color: gameQueueService.playerColors.get(p.userId) || null,
-        isBot: p.isBot || false
+        isBot: p.isBot || false,
+        cumulativeScore: p.cumulativeScore || 0
       })),
       validMoves,
+      round: session.round,
     };
   
     // Send regular gameState to active human players only
