@@ -187,6 +187,14 @@ export const signup = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "All fields required" });
   }
 
+
+  const existing = await prisma.account.findUnique({
+    where: { email },
+  });
+  
+  if (existing) {
+    return res.status(409).json({ error: "User already exists" });
+  }
   try {
     const emailExists = await prisma.account.findUnique({
       where: { email },
@@ -251,17 +259,12 @@ export const signup = async (req: Request, res: Response) => {
 export const signin = async (req: Request, res: Response) => {
   const { email, password, profileId } = req.body;
 
+
   if (!email || !password) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
-  const existing = await prisma.account.findUnique({
-    where: { email },
-  });
   
-  if (existing) {
-    return res.status(409).json({ error: "User already exists" });
-  }
 
   try {
     const account = await prisma.account.findUnique({

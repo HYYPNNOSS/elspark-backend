@@ -165,118 +165,135 @@ export class GameQueueService {
   }
 
   // NEW: Manual game start with randomized selection
-  public async startGameManually(): Promise<{
-    gameSessionId: number;
-    players: Array<{
-      userId: number;
-      username: string;
-      color: string;
-      isBot: boolean;
-    }>;
-  }> {
-    console.log(`🎮 Manual game start initiated`);
+// In gameQueue.service.ts, replace the startGameManually method with this:
+
+public async startGameManually(): Promise<{
+  gameSessionId: number;
+  players: Array<{
+    userId: number;
+    username: string;
+    color: string;
+    isBot: boolean;
+  }>;
+}> {
+  console.log(`🎮 Manual game start initiated`);
+  
+  const selectedPlayers: Array<{
+    userId: number;
+    username: string;
+    color: string;
+    isBot: boolean;
+  }> = [];
+  
+  // Collect all real player IDs first
+  const realPlayerIds: number[] = [];
+  
+  for (const color of VALID_COLORS) {
+    const colorQueue = this.colorQueues.get(color);
     
-    const selectedPlayers: Array<{
-      userId: number;
-      username: string;
-      color: string;
-      isBot: boolean;
-    }> = [];
-    
-    // For each color, randomly select one player or create a bot
-    for (const color of VALID_COLORS) {
-      const colorQueue = this.colorQueues.get(color);
+    if (!colorQueue || colorQueue.length === 0) {
+      // No players for this color - create a bot
+      const botId = -(this.botCounter++);
+      const botName = this.generateBotName();
       
-      if (!colorQueue || colorQueue.length === 0) {
-        // No players for this color - create a bot
-        const botId = -(this.botCounter++); // Negative IDs for bots
-        const botName = this.generateBotName();
-        
-        selectedPlayers.push({
-          userId: botId,
-          username: botName,
-          color: color,
-          isBot: true
-        });
-        
-        console.log(`🤖 No players for ${color}, added bot: ${botName}`);
-      } else {
-        // Randomly select one player from this color queue
-        const randomIndex = Math.floor(Math.random() * colorQueue.length);
-        const selectedUserId = colorQueue[randomIndex];
-        
-        selectedPlayers.push({
-          userId: selectedUserId,
-          username: `Player${selectedUserId}`,
-          color: color,
-          isBot: false
-        });
-        
-        console.log(`✅ Randomly selected player ${selectedUserId} from ${color} queue (${colorQueue.length} players)`);
-      }
+      selectedPlayers.push({
+        userId: botId,
+        username: botName,
+        color: color,
+        isBot: true
+      });
+      
+      console.log(`🤖 No players for ${color}, added bot: ${botName}`);
+    } else {
+      // Randomly select one player from this color queue
+      const randomIndex = Math.floor(Math.random() * colorQueue.length);
+      const selectedUserId = colorQueue[randomIndex];
+      realPlayerIds.push(selectedUserId);
+      
+      // Add placeholder for now, we'll fetch usernames next
+      selectedPlayers.push({
+        userId: selectedUserId,
+        username: '', // Will be filled below
+        color: color,
+        isBot: false
+      });
+      
+      console.log(`✅ Randomly selected player ${selectedUserId} from ${color} queue (${colorQueue.length} players)`);
     }
-
-    console.log(`🚀 Starting game with players:`, selectedPlayers);
-    
-    // Extract only real player IDs for game session
-    const realPlayerIds = selectedPlayers
-      .filter(p => !p.isBot)
-      .map(p => p.userId);
-    
-    // Clear timers and remove from queues for real players
-    realPlayerIds.forEach(pid => {
-      const timer = this.queueTimers.get(pid);
-      if (timer) clearTimeout(timer);
-      this.queueTimers.delete(pid);
-      this.playersInGame.add(pid);
-    });
-  
-    // Remove selected real players from color queues
-    for (const [color, queue] of this.colorQueues.entries()) {
-      this.colorQueues.set(color, queue.filter(id => !realPlayerIds.includes(id)));
-    }
-
-    // Create game session (only store real players in DB)
-    const gameSession = await prisma.gameSession.create({
-      data: {
-        status: 'IN_PROGRESS',
-        startedAt: new Date(),
-        players: {
-          create: realPlayerIds.map(id => ({ profile: { connect: { id } } }))
-        }
-      },
-      include: { players: { include: { profile: true } } }
-    });
-
-    console.log("✅ Game session created:", {
-      id: gameSession.id,
-      idType: typeof gameSession.id,
-      status: gameSession.status
-    });
-  
-    await prisma.profile.updateMany({
-      where: { id: { in: realPlayerIds } },
-      data: { looking: false, isonrand: true }
-    });
-    
-    console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
-    console.log(`📊 Remaining queues:`, {
-      red: this.colorQueues.get('red')?.length || 0,
-      brown: this.colorQueues.get('brown')?.length || 0,
-      blue: this.colorQueues.get('blue')?.length || 0,
-      green: this.colorQueues.get('green')?.length || 0,
-    });
-
-    this.broadcastQueueUpdate();
-
-    const numericId = Number(gameSession.id);
-    console.log("🎮 Returning game session ID:", numericId, "type:", typeof numericId);
-    
-    return {
-      gameSessionId: numericId,
-      players: selectedPlayers
-    };
   }
+
+  // Fetch actual usernames from database for real players
+  if (realPlayerIds.length > 0) {
+    const profiles = await prisma.profile.findMany({
+      where: { id: { in: realPlayerIds } },
+      select: { id: true, username: true }
+    });
+
+    // Map usernames to the selectedPlayers array
+    selectedPlayers.forEach(player => {
+      if (!player.isBot) {
+        const profile = profiles.find(p => p.id === player.userId);
+        player.username = profile?.username || `Player${player.userId}`;
+      }
+    });
+  }
+
+  console.log(`🚀 Starting game with players:`, selectedPlayers);
+  
+  // Clear timers and remove from queues for real players
+  realPlayerIds.forEach(pid => {
+    const timer = this.queueTimers.get(pid);
+    if (timer) clearTimeout(timer);
+    this.queueTimers.delete(pid);
+    this.playersInGame.add(pid);
+  });
+
+  // Remove selected real players from color queues
+  for (const [color, queue] of this.colorQueues.entries()) {
+    this.colorQueues.set(color, queue.filter(id => !realPlayerIds.includes(id)));
+  }
+
+  // Create game session (only store real players in DB)
+  const gameSession = await prisma.gameSession.create({
+    data: {
+      status: 'IN_PROGRESS',
+      startedAt: new Date(),
+      players: {
+        create: realPlayerIds.map(id => ({ profile: { connect: { id } } }))
+      }
+    },
+    include: { players: { include: { profile: true } } }
+  });
+
+  console.log("✅ Game session created:", {
+    id: gameSession.id,
+    idType: typeof gameSession.id,
+    status: gameSession.status
+  });
+
+  await prisma.profile.updateMany({
+    where: { id: { in: realPlayerIds } },
+    data: { looking: false, isonrand: true }
+  });
+  
+  console.log(`🎮 Game ${gameSession.id} started with players:`, selectedPlayers);
+  console.log(`📊 Remaining queues:`, {
+    red: this.colorQueues.get('red')?.length || 0,
+    brown: this.colorQueues.get('brown')?.length || 0,
+    blue: this.colorQueues.get('blue')?.length || 0,
+    green: this.colorQueues.get('green')?.length || 0,
+  });
+
+  this.broadcastQueueUpdate();
+
+  const numericId = Number(gameSession.id);
+  console.log("🎮 Returning game session ID:", numericId, "type:", typeof numericId);
+  
+  return {
+    gameSessionId: numericId,
+    players: selectedPlayers
+  };
+}
 
   async removeFromQueue(userId: number): Promise<void> {
     // Remove from all color queues
