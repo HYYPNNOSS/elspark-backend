@@ -259,28 +259,40 @@ export const signup = async (req: Request, res: Response) => {
 export const signin = async (req: Request, res: Response) => {
   const { email, password, profileId } = req.body;
 
-
+  // Validate input format
   if (!email || !password) {
-    return res.status(400).json({ error: "All fields are required" });
+    return res.status(400).json({ error: "Email and password are required" });
   }
 
-  
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: "Invalid email format" });
+  }
+
+  // Validate password length
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
 
   try {
+    // Check if account exists
     const account = await prisma.account.findUnique({
       where: { email },
       include: { profiles: true },
     });
 
     if (!account) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(404).json({ error: "Email not found. Please sign up first." });
     }
 
+    // Verify password
     const isPasswordValid = await bcrypt.compare(password, account.password);
     if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Incorrect password. Please try again." });
     }
 
+    // Select profile
     let selectedProfile = account.profiles.find(p => p.isActive);
     
     if (profileId) {
@@ -292,9 +304,10 @@ export const signin = async (req: Request, res: Response) => {
     }
 
     if (!selectedProfile) {
-      return res.status(404).json({ error: "No profiles found" });
+      return res.status(404).json({ error: "No profiles found for this account" });
     }
 
+    // Update active profile
     await prisma.profile.updateMany({
       where: { accountId: account.id },
       data: { isActive: false },
@@ -305,6 +318,7 @@ export const signin = async (req: Request, res: Response) => {
       data: { isActive: true },
     });
 
+    // Generate tokens
     const accessToken = generateAccessToken(account, selectedProfile);
     const refreshToken = await generateRefreshToken(account.id, selectedProfile.id);
 
@@ -328,10 +342,11 @@ export const signin = async (req: Request, res: Response) => {
       })),
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Server error" });
+    console.error("Signin error:", err);
+    return res.status(500).json({ error: "Server error. Please try again later." });
   }
 };
+
 
 export const refreshAccessToken = async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
