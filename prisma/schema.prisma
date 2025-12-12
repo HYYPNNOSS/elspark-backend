@@ -7,87 +7,131 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===== ACCOUNT & PROFILE MODELS =====
-
 model Account {
-  id               Int      @id @default(autoincrement())
-  email            String   @unique
+  id               Int                   @id @default(autoincrement())
+  email            String                @unique
   password         String
-  cyberCoins       Decimal  @default(5) @db.Decimal(10, 2)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  
-  profiles         Profile[]
+  cyberCoins       Decimal               @default(5.00) @db.Decimal(10, 2)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   refreshTokens    AccountRefreshToken[]
-  coinTransactions CoinTransaction[] @relation("AccountTransactions")
+  coinTransactions CoinTransaction[]     @relation("AccountTransactions")
   resetTokens      PasswordResetToken[]
-  
+  profiles         Profile[]
+
   @@map("accounts")
 }
 
 model Profile {
-  id             Int      @id @default(autoincrement())
-  accountId      Int
-  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  
-  username       String   @unique
-  profilePicture String   @default("/uploads/profiles/profile-default.jpg")
-  bio            String?  @db.Text
-  color          String?
-  
-  isActive       Boolean  @default(false) // Currently selected profile
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  
-  online         Boolean  @default(false)
-  isonrand       Boolean  @default(false)
-  looking        Boolean  @default(false)
-  
-  posts                  Post[]           @relation("PostAuthors")
-  coownedPosts           PostCoowner[]
-  collections            PostCollection[]
-  comments               Comment[]
-  
-  sentMessages           Message[] @relation("SentMessages")
-  receivedMessages       Message[] @relation("ReceivedMessages")
-  
-  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
-  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
-  friends                Friendship[]    @relation("UserFriends")
-  friendOf               Friendship[]    @relation("FriendOf")
-  
-  following              Follow[] @relation("UserFollowing")
-  followers              Follow[] @relation("UserFollowers")
-  
-  chatAsUser1            ChatConnection[] @relation("ChatUser1")
-  chatAsUser2            ChatConnection[] @relation("ChatUser2")
-  
-  gameStats              GameStats[]
-  notifications          Notification[] 
-  playerInGames          PlayerInGame[]
-  
-  aiMessages             AIMsg[]
-  aiSessions             AISession[]
-  
-  isMooshi               Boolean  @default(false)
-  isApproved             Boolean  @default(false)
-  mooshiNumber           Int?     @unique
+  id                     Int              @id @default(autoincrement())
+  accountId              Int
+  username               String           @unique
+  profilePicture         String           @default("/uploads/profiles/profile-default.jpg")
+  bio                    String?          @db.Text
+  color                  String?
+  isActive               Boolean          @default(false)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  online                 Boolean          @default(false)
+  isonrand               Boolean          @default(false)
+  looking                Boolean          @default(false)
+  isMooshi               Boolean          @default(false)
+  isApproved             Boolean          @default(false)
+  mooshiNumber           Int?             @unique
   journal                Json?
   mooshiConv             Json?
-  
+  gameStats              GameStats[]
+  notifications          Notification[]
+  playerInGames          PlayerInGame[]
+  aiMessages             AIMsg[]
+  aiSessions             AISession[]
+  chatAsUser1            ChatConnection[] @relation("ChatUser1")
+  chatAsUser2            ChatConnection[] @relation("ChatUser2")
+  comments               Comment[]
+  following              Follow[]         @relation("UserFollowing")
+  followers              Follow[]         @relation("UserFollowers")
+  receivedFriendRequests FriendRequest[]  @relation("ReceivedFriendRequests")
+  sentFriendRequests     FriendRequest[]  @relation("SentFriendRequests")
+  friendOf               Friendship[]     @relation("FriendOf")
+  friends                Friendship[]     @relation("UserFriends")
+  receivedMessages       Message[]        @relation("ReceivedMessages")
+  sentMessages           Message[]        @relation("SentMessages")
+  collections            PostCollection[]
+  coownedPosts           PostCoowner[]
+  posts                  Post[]           @relation("PostAuthors")
+  account                Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  uploadedVideos  ElsparkVideo[]      @relation("VideoUploader")
+  videoCollection ElsparkCollection[] @relation("UserVideoCollection")
+  queuedVideos    LiveTVQueue[]       @relation("QueueUploader")
+
+  @@index([accountId], map: "profiles_accountId_fkey")
   @@map("profiles")
+}
+
+model ElsparkVideo {
+  id          String              @id @default(uuid())
+  title       String
+  description String?             @db.Text
+  url         String
+  filename    String
+  duration    Float               @default(0)
+  fileSize    Int
+  uploaderId  Int
+  source      String // 'live_tv' or 'collection'
+  status      String              @default("queued") // 'queued', 'in_collection', 'playing', 'played'
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  uploader    Profile             @relation("VideoUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  collections ElsparkCollection[]
+  queueItems  LiveTVQueue[]
+
+  @@index([uploaderId], map: "elspark_videos_uploaderId_fkey")
+  @@map("elspark_videos")
+}
+
+model ElsparkCollection {
+  profileId     Int
+  videoId       String
+  purchaseType  String       @default("upload") // 'upload' or 'purchase'
+  purchasePrice Int?
+  purchasedAt   DateTime     @default(now())
+  profile       Profile      @relation("UserVideoCollection", fields: [profileId], references: [id], onDelete: Cascade)
+  video         ElsparkVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, videoId])
+  @@index([videoId], map: "elspark_collection_videoId_fkey")
+  @@map("elspark_collection")
+}
+
+model LiveTVQueue {
+  id         String       @id @default(uuid())
+  videoId    String
+  position   Int
+  status     String       @default("waiting") // 'waiting', 'playing', 'played'
+  uploaderId Int
+  startTime  DateTime?
+  endTime    DateTime?
+  createdAt  DateTime     @default(now())
+  video      ElsparkVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  uploader   Profile      @relation("QueueUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([videoId], map: "live_tv_queue_videoId_fkey")
+  @@index([uploaderId], map: "live_tv_queue_uploaderId_fkey")
+  @@map("live_tv_queue")
 }
 
 model AccountRefreshToken {
   id        Int      @id @default(autoincrement())
   token     String   @unique
   accountId Int
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  profileId Int?     // Track which profile this token is for
+  profileId Int?
   expiresAt DateTime
   createdAt DateTime @default(now())
-  
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
   @@index([token])
+  @@index([accountId], map: "account_refresh_tokens_accountId_fkey")
   @@map("account_refresh_tokens")
 }
 
@@ -95,80 +139,72 @@ model PasswordResetToken {
   id        Int      @id @default(autoincrement())
   token     String   @unique
   accountId Int
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
-  
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
   @@index([token])
+  @@index([accountId], map: "password_reset_tokens_accountId_fkey")
   @@map("password_reset_tokens")
 }
-
-// ===== GAME MODELS =====
 
 model GameStats {
   id        String   @id @default(uuid())
   profileId Int
-  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   wins      Int      @default(0)
   losses    Int      @default(0)
   draws     Int      @default(0)
   createdAt DateTime @default(now())
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId], map: "GameStats_profileId_fkey")
 }
 
 model GameSession {
-  id         Int            @id @default(autoincrement())
-  status     GameStatus     @default(WAITING)
-  createdAt  DateTime       @default(now())
-  startedAt  DateTime?
-  endedAt    DateTime?
-  winnerId   Int?
-  players    PlayerInGame[]
-  botPlayers BotInGame[]
-
+  id          Int            @id @default(autoincrement())
+  status      GameStatus     @default(WAITING)
+  createdAt   DateTime       @default(now())
+  startedAt   DateTime?
+  endedAt     DateTime?
+  winnerId    Int?
   boardState  Json?
   currentTurn Int?
+  botPlayers  BotInGame[]
+  players     PlayerInGame[]
 }
 
 model PlayerInGame {
   id            Int         @id @default(autoincrement())
-  gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
   gameSessionId Int
-  profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
   profileId     Int
   createdAt     DateTime    @default(now())
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
+  profile       Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([gameSessionId, profileId])
+  @@index([profileId], map: "PlayerInGame_profileId_fkey")
 }
 
 model BotInGame {
   id            Int         @id @default(autoincrement())
-  gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
   gameSessionId Int
   botId         String
   createdAt     DateTime    @default(now())
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id])
 
   @@unique([gameSessionId, botId])
 }
-
-enum GameStatus {
-  WAITING
-  IN_PROGRESS
-  COMPLETED
-  ABANDONED
-}
-
-// ===== SOCIAL MODELS =====
 
 model Follow {
   id          Int      @id @default(autoincrement())
   followerId  Int
   followingId Int
   createdAt   DateTime @default(now())
-
-  follower  Profile @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
-  following Profile @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+  follower    Profile  @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following   Profile  @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
+  @@index([followingId], map: "follows_followingId_fkey")
   @@map("follows")
 }
 
@@ -180,17 +216,12 @@ model ChatConnection {
   status    ChatStatus @default(ACTIVE)
   createdAt DateTime   @default(now())
   endedAt   DateTime?
-
-  user1 Profile @relation("ChatUser1", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2 Profile @relation("ChatUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  user1     Profile    @relation("ChatUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2     Profile    @relation("ChatUser2", fields: [user2Id], references: [id], onDelete: Cascade)
 
   @@unique([user1Id, user2Id])
+  @@index([user2Id], map: "chat_connections_user2Id_fkey")
   @@map("chat_connections")
-}
-
-enum ChatStatus {
-  ACTIVE
-  ENDED
 }
 
 model FriendRequest {
@@ -199,11 +230,11 @@ model FriendRequest {
   receiverId Int
   status     String   @default("pending")
   createdAt  DateTime @default(now())
-
-  sender   Profile @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver Profile @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiver   Profile  @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender     Profile  @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@unique([senderId, receiverId])
+  @@index([receiverId], map: "friend_requests_receiverId_fkey")
   @@map("friend_requests")
 }
 
@@ -212,152 +243,148 @@ model Friendship {
   userId    Int
   friendId  Int
   createdAt DateTime @default(now())
-
-  user   Profile @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
-  friend Profile @relation("FriendOf", fields: [friendId], references: [id], onDelete: Cascade)
+  friend    Profile  @relation("FriendOf", fields: [friendId], references: [id], onDelete: Cascade)
+  user      Profile  @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, friendId])
+  @@index([friendId], map: "friendships_friendId_fkey")
   @@map("friendships")
 }
 
 model Message {
-  id        Int      @id @default(autoincrement())
-  content   String
-  createdAt DateTime @default(now())
-
+  id         Int      @id @default(autoincrement())
+  content    String
+  createdAt  DateTime @default(now())
   senderId   Int
   receiverId Int
+  receiver   Profile  @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender     Profile  @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
 
-  sender   Profile @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver Profile @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
-
+  @@index([receiverId], map: "messages_receiverId_fkey")
+  @@index([senderId], map: "messages_senderId_fkey")
   @@map("messages")
 }
 
-// ===== CONTENT MODELS =====
-
 model Post {
-  id        Int      @id @default(autoincrement())
-  text      String?  @db.Text
-  title     String? 
-  imageUrl  String?
-  videoUrl  String?
-  isPrivate Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  isAnonymous   Boolean  @default(false)
+  id               Int                @id @default(autoincrement())
+  text             String?            @db.Text
+  title            String?
+  imageUrl         String?
+  videoUrl         String?
+  isPrivate        Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  isAnonymous      Boolean            @default(false)
   originalAuthorId Int?
-  deletedAt     DateTime?
-
-  authorId Int
-  author   Profile @relation("PostAuthors", fields: [authorId], references: [id], onDelete: Cascade)
-
-  coowners         PostCoowner[]
-  collections      PostCollection[]
+  deletedAt        DateTime?
+  authorId         Int
   comments         Comment[]
+  collections      PostCollection[]
+  coowners         PostCoowner[]
   PostInCollection PostInCollection[]
+  author           Profile            @relation("PostAuthors", fields: [authorId], references: [id], onDelete: Cascade)
 
+  @@index([authorId], map: "posts_authorId_fkey")
   @@map("posts")
 }
 
 model PostCoowner {
-  post   Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
   postId Int
-  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId Int
+  post   Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([postId, userId])
+  @@index([userId], map: "post_coowners_userId_fkey")
   @@map("post_coowners")
 }
 
 model PostCollection {
-  id        Int      @id @default(autoincrement())
+  id        Int                @id @default(autoincrement())
   title     String
   userId    Int
-  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  createdAt DateTime           @default(now())
+  postId    Int?
+  Post      Post?              @relation(fields: [postId], references: [id])
+  user      Profile            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  posts     PostInCollection[]
 
-  posts  PostInCollection[]
-  Post   Post?              @relation(fields: [postId], references: [id])
-  postId Int?
-
+  @@index([postId], map: "post_collections_postId_fkey")
+  @@index([userId], map: "post_collections_userId_fkey")
   @@map("post_collections")
 }
 
 model PostInCollection {
-  id           Int @id @default(autoincrement())
+  id           Int            @id @default(autoincrement())
   postId       Int
   collectionId Int
-
-  post       Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
-  collection PostCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collection   PostCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([postId, collectionId])
+  @@index([collectionId], map: "post_in_collections_collectionId_fkey")
   @@map("post_in_collections")
 }
 
 model Comment {
-  id        Int      @id @default(autoincrement())
-  content   String   @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        Int       @id @default(autoincrement())
+  content   String    @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  authorId  Int
+  postId    Int?
+  parentId  Int?
+  author    Profile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  post      Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
 
-  authorId Int
-  author   Profile @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  postId Int?
-  post   Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  parentId Int?
-  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies  Comment[] @relation("CommentReplies")
-
+  @@index([authorId], map: "comments_authorId_fkey")
+  @@index([parentId], map: "comments_parentId_fkey")
+  @@index([postId], map: "comments_postId_fkey")
   @@map("comments")
 }
 
 model Notification {
   id        String   @id @default(cuid())
-  type      String   
+  type      String
   message   String
-  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  profileId Int      
+  profileId Int
   postId    String?
   route     String?
   commentId String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
-}
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-// ===== PAYMENT MODELS =====
+  @@index([profileId], map: "Notification_profileId_fkey")
+}
 
 model CoinTransaction {
   id                    Int      @id @default(autoincrement())
   accountId             Int
-  amount                Int      
-  priceGBP              Float    
+  amount                Int
+  priceGBP              Float
   stripePaymentIntentId String   @unique
-  status                String   // 'pending', 'completed', 'failed'
+  status                String
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
-  
   account               Account  @relation("AccountTransactions", fields: [accountId], references: [id], onDelete: Cascade)
-  
+
+  @@index([accountId], map: "coin_transactions_accountId_fkey")
   @@map("coin_transactions")
 }
-
-// ===== AI MODELS =====
 
 model AIMsg {
   id        Int      @id @default(autoincrement())
   profileId Int
-  sender    String   // either 'user' or 'bot'
+  sender    String
   message   String   @db.Text
-  sessionId String? 
+  sessionId String?
   createdAt DateTime @default(now())
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
+  @@index([profileId], map: "ai_messages_profileId_fkey")
   @@map("ai_messages")
 }
 
@@ -365,12 +392,24 @@ model AISession {
   id        String   @id @default(uuid())
   profileId Int
   botId     Int
-  duration  Int      // in minutes
+  duration  Int
   startTime DateTime @default(now())
   endTime   DateTime
   isActive  Boolean  @default(true)
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
+  @@index([profileId], map: "ai_sessions_profileId_fkey")
   @@map("ai_sessions")
+}
+
+enum GameStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum ChatStatus {
+  ACTIVE
+  ENDED
 }
