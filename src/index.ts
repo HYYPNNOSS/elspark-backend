@@ -26,6 +26,11 @@ import multer from "multer";
 import Stripe from 'stripe';
 import mooshiRoutes from './routes/mooshi';
 
+import elsparkRoutes from './routes/elsparkRoutes';
+import { setupElsparkWebSocket } from './sockets/elspark.socket';
+
+
+
 
 
 
@@ -90,6 +95,8 @@ const io = new Server(server, {
 });
 
 setupGameWebSocket(io);
+setupElsparkWebSocket(io);
+
 
 app.use(express.json());
 app.use("/api/users", router);
@@ -115,6 +122,8 @@ app.use("/api/ai-sessions", aiSessionsRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/ai-messages", aiMessagesRoute);
 app.use('/api/mooshi', mooshiRoutes);
+app.use('/api/elspark', elsparkRoutes);
+
 
 app.get('/ping', (req, res) => {
   res.json({ status: 'alive', time: new Date() });
@@ -522,6 +531,7 @@ const roomPresence = new Map();
 
 const lookingQueue: number[] = [];
 const activeRooms = new Map<number, string>();
+
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
