@@ -61,47 +61,48 @@ model Profile {
   posts                  Post[]           @relation("PostAuthors")
   account                Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  uploadedVideos  ElsparkVideo[]      @relation("VideoUploader")
-  videoCollection ElsparkCollection[] @relation("UserVideoCollection")
-  queuedVideos    LiveTVQueue[]       @relation("QueueUploader")
+  uploadedVideos  ElsparkVideo[]    @relation("VideoUploader")
+  ownedVideos     VideoOwnership[]  @relation("VideoOwner")
+  queuedVideos    LiveTVQueue[]     @relation("QueueUploader")
 
   @@index([accountId], map: "profiles_accountId_fkey")
   @@map("profiles")
 }
 
 model ElsparkVideo {
-  id          String              @id @default(uuid())
+  id          String           @id @default(uuid())
   title       String
-  description String?             @db.Text
+  description String?          @db.Text
   url         String
   filename    String
-  duration    Float               @default(0)
+  duration    Float            @default(0)
   fileSize    Int
   uploaderId  Int
-  source      String // 'live_tv' or 'collection'
-  status      String              @default("queued") // 'queued', 'in_collection', 'playing', 'played'
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  uploader    Profile             @relation("VideoUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
-  collections ElsparkCollection[]
+  source      String           @default("collection") // 'collection'
+  status      String           @default("in_collection") // 'in_collection', 'queued', 'playing', 'played'
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  uploader    Profile          @relation("VideoUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  owners      VideoOwnership[]
   queueItems  LiveTVQueue[]
 
   @@index([uploaderId], map: "elspark_videos_uploaderId_fkey")
   @@map("elspark_videos")
 }
 
-model ElsparkCollection {
-  profileId     Int
-  videoId       String
-  purchaseType  String       @default("upload") // 'upload' or 'purchase'
-  purchasePrice Int?
-  purchasedAt   DateTime     @default(now())
-  profile       Profile      @relation("UserVideoCollection", fields: [profileId], references: [id], onDelete: Cascade)
-  video         ElsparkVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+model VideoOwnership {
+  profileId        Int
+  videoId          String
+  ownershipShare   Float           @default(100.0) 
+  acquisitionType  String          
+  acquisitionPrice Int             
+  acquiredAt       DateTime        @default(now())
+  profile          Profile         @relation("VideoOwner", fields: [profileId], references: [id], onDelete: Cascade)
+  video            ElsparkVideo    @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@id([profileId, videoId])
-  @@index([videoId], map: "elspark_collection_videoId_fkey")
-  @@map("elspark_collection")
+  @@index([videoId], map: "video_ownership_videoId_fkey")
+  @@map("video_ownership")
 }
 
 model LiveTVQueue {

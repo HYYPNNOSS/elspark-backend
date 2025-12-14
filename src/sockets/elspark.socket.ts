@@ -216,7 +216,7 @@ export function setupElsparkWebSocket(io: Server) {
   loadInitialVideo(elsparkNamespace);
 }
 
-async function playNextVideo(namespace: any) {
+export async function playNextVideo(namespace: any) {
   try {
     // Mark current video as played
     if (currentVideoState.video) {
@@ -278,6 +278,8 @@ async function playNextVideo(namespace: any) {
         startedAt: Date.now()
       };
 
+      console.log('Broadcasting video:started event for:', nextVideo.video.title);
+
       // Broadcast video started
       namespace.to('live-tv-main').emit('video:started', {
         video: currentVideoState.video,
@@ -291,6 +293,7 @@ async function playNextVideo(namespace: any) {
       });
     } else {
       // No videos in queue
+      console.log('No videos in queue, emitting queue_empty');
       currentVideoState = {
         video: null,
         currentTime: 0,
@@ -304,6 +307,7 @@ async function playNextVideo(namespace: any) {
     console.error('Error playing next video:', error);
   }
 }
+
 
 async function loadInitialVideo(namespace: any) {
   try {
@@ -326,6 +330,7 @@ async function loadInitialVideo(namespace: any) {
     });
 
     if (playingVideo) {
+      // Resume existing playing video
       currentVideoState = {
         video: {
           id: playingVideo.id,
@@ -345,7 +350,8 @@ async function loadInitialVideo(namespace: any) {
         startedAt: Date.now()
       };
     } else {
-      // No playing video, start the first one
+      // No playing video, start the first one in queue
+      console.log('No playing video found, attempting to play next video');
       await playNextVideo(namespace);
     }
   } catch (error) {
@@ -378,6 +384,29 @@ function startVideoSyncBroadcast(namespace: any) {
       }
     }
   }, 5000);
+}
+
+
+export async function checkAndStartPlayback(namespace: any) {
+  try {
+    const current = await elsparkService.getCurrentVideo();
+    const queue = await elsparkService.getQueue();
+    
+    console.log('Checking playback state:', { 
+      hasCurrentVideo: !!current, 
+      queueLength: queue.length 
+    });
+    
+    if (!current && queue.length > 0) {
+      console.log('No video playing but queue has videos - starting playback');
+      await playNextVideo(namespace);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error checking playback:', error);
+    return false;
+  }
 }
 
 // Utility function to emit to specific user

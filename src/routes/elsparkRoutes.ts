@@ -4,18 +4,18 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { ElsparkService } from '../services/elspark.service';
-import { emitCoinUpdate, emitCollectionUpdate, broadcastQueueUpdate } from '../sockets/elspark.socket';
+import { emitCoinUpdate, broadcastQueueUpdate } from '../sockets/elspark.socket';
 
 const router = express.Router();
 const elsparkService = new ElsparkService();
 
-// Use system temp directory for temporary file storage before uploading to Wasabi
+// Use system temp directory for temporary file storage
 const tempDir = path.join(os.tmpdir(), 'elspark-temp');
 if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
 }
 
-// Multer configuration for video uploads (temporary local storage)
+// Multer configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, tempDir);
@@ -44,12 +44,12 @@ const upload = multer({
   }
 });
 
-// Middleware to validate profileId
-const validateProfileId = (req: Request, res: Response, next: Function) => {
-  const profileId = parseInt(req.body.profileId || req.query.profileId as string);
+// Middleware
+const validateProfileIdBody = (req: Request, res: Response, next: Function) => {
+  const profileId = parseInt(req.body.profileId);
   
   if (!profileId || isNaN(profileId)) {
-    res.status(400).json({ error: 'Valid profileId is required' });
+    res.status(400).json({ error: 'Valid profileId is required in body' });
     return;
   }
   
@@ -57,13 +57,27 @@ const validateProfileId = (req: Request, res: Response, next: Function) => {
   next();
 };
 
-// ========== VIDEO MANAGEMENT ROUTES ==========
+const validateProfileIdQuery = (req: Request, res: Response, next: Function) => {
+  const profileId = parseInt(req.query.profileId as string);
+  
+  if (!profileId || isNaN(profileId)) {
+    res.status(400).json({ error: 'Valid profileId is required in query' });
+    return;
+  }
+  
+
+  res.locals.profileId = profileId;
+  next();
+};
+
+// ========== COLLECTION ROUTES ==========
 
 /**
- * POST /api/elspark/videos/upload
- * Upload video directly to Live TV (1 elsCoin)
+ * POST /api/elspark/collection/upload
+ * Upload video to collection (1 elsCoin)
+ * User becomes initial owner with 100% ownership
  */
-router.post('/videos/upload', upload.single('video'), validateProfileId, async (req: Request, res: Response) => {
+router.post('/collection/upload', upload.single('video'), validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       res.status(400).json({ error: 'No video file uploaded' });
@@ -77,7 +91,7 @@ router.post('/videos/upload', upload.single('video'), validateProfileId, async (
       return;
     }
 
-    const result = await elsparkService.uploadToLiveTV(
+    const result = await elsparkService.uploadToCollection(
       profileId,
       req.file,
       title.trim(),
@@ -88,35 +102,161 @@ router.post('/videos/upload', upload.single('video'), validateProfileId, async (
     if (req.app.get('io')) {
       const io = req.app.get('io');
       emitCoinUpdate(profileId, result.newBalance, io);
-      broadcastQueueUpdate(io);
     }
 
     res.status(201).json({
       success: true,
-      message: 'Video uploaded to Live TV successfully',
+      message: 'Video uploaded to collection successfully',
       data: {
         video: result.video,
-        queueItem: result.queueItem,
         newBalance: result.newBalance
       }
     });
   } catch (error: any) {
-    console.error('Error uploading video to Live TV:', error);
+    console.error('Error uploading video to collection:', error);
     
-    // Clean up uploaded file on error
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
 
     res.status(400).json({ 
-      error: error.message || 'Failed to upload video' 
+      error: error.message || 'Failed to upload video to collection' 
     });
   }
 });
 
 /**
+ * GET /api/elspark/collection
+ * Get user's owned videos
+ */
+router.get('/collection', validateProfileIdQuery, async (req: Request, res: Response) => {
+  try {
+    const profileId = res.locals.profileId; 
+
+    const collection = await elsparkService.getUserCollection(profileId);
+
+    res.json({
+      success: true,
+      data: collection
+    });
+  } catch (error: any) {
+    console.error('Error fetching collection:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to fetch collection' 
+    });
+  }
+});
+
+
+/**
+ * POST /api/elspark/collection/purchase/:videoId
+ * Purchase ownership share of video (2 elsCoins)
+ * Revenue distributed among existing owners
+ */
+router.post('/collection/purchase/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
+  try {
+    const { videoId } = req.params;
+    const { profileId } = req.body;
+
+    const result = await elsparkService.purchaseVideo(profileId, videoId);
+
+    // Emit socket events to buyer and all owners who received revenue
+    if (req.app.get('io')) {
+      const io = req.app.get('io');
+      emitCoinUpdate(profileId, result.buyerNewBalance, io);
+      
+      // Notify all owners who received revenue
+      for (const update of result.ownerUpdates) {
+        emitCoinUpdate(update.profileId, update.newBalance, io);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Video ownership purchased successfully. You now own ${result.newOwnershipShare.toFixed(1)}%`,
+      data: {
+        ownership: result.ownership,
+        newBalance: result.buyerNewBalance,
+        ownershipShare: result.newOwnershipShare
+      }
+    });
+  } catch (error: any) {
+    console.error('Error purchasing video:', error);
+    res.status(400).json({ 
+      error: error.message || 'Failed to purchase video' 
+    });
+  }
+});
+
+/**
+ * POST /api/elspark/collection/post/:videoId
+ * Post owned video to Live TV (FREE)
+ */
+// Replace the POST /api/elspark/collection/post/:videoId route in elsparkRoutes.ts
+
+router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
+  try {
+    const { videoId } = req.params;
+    const { profileId } = req.body;
+
+    const result = await elsparkService.postToLiveTV(profileId, videoId);
+
+    if (req.app.get('io')) {
+      const io = req.app.get('io');
+      const namespace = io.of('/elspark-tv');
+      
+      broadcastQueueUpdate(io);
+      
+      // Import the helper
+      const { checkAndStartPlayback } = require('../sockets/elspark.socket');
+      
+      // Small delay then check
+      setTimeout(() => {
+        checkAndStartPlayback(namespace);
+      }, 300);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Video posted to Live TV',
+      data: result
+    });
+  } catch (error: any) {
+    console.error('Error posting to Live TV:', error);
+    res.status(400).json({ 
+      error: error.message || 'Failed to post video to Live TV' 
+    });
+  }
+});
+
+/**
+ * DELETE /api/elspark/collection/:videoId
+ * Remove ownership from video or delete if sole owner
+ */
+router.delete('/collection/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
+  try {
+    const { videoId } = req.params;
+    const { profileId } = req.body;
+
+    await elsparkService.removeFromCollection(profileId, videoId);
+
+    res.json({
+      success: true,
+      message: 'Ownership removed from video'
+    });
+  } catch (error: any) {
+    console.error('Error removing from collection:', error);
+    res.status(400).json({ 
+      error: error.message || 'Failed to remove video from collection' 
+    });
+  }
+});
+
+// ========== VIDEO ROUTES ==========
+
+/**
  * GET /api/elspark/videos/:id
- * Get video details
+ * Get video details with ownership info
  */
 router.get('/videos/:id', async (req: Request, res: Response) => {
   try {
@@ -143,20 +283,18 @@ router.get('/videos/:id', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/elspark/videos/:id
- * Delete video (only owner can delete)
+ * Delete video (only if sole owner)
  */
-router.delete('/videos/:id', validateProfileId, async (req: Request, res: Response) => {
+router.delete('/videos/:id', validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { profileId } = req.body;
 
     await elsparkService.deleteVideo(profileId, id);
 
-    // Emit socket events
     if (req.app.get('io')) {
       const io = req.app.get('io');
       broadcastQueueUpdate(io);
-      emitCollectionUpdate(profileId, io);
     }
 
     res.json({
@@ -167,178 +305,6 @@ router.delete('/videos/:id', validateProfileId, async (req: Request, res: Respon
     console.error('Error deleting video:', error);
     res.status(400).json({ 
       error: error.message || 'Failed to delete video' 
-    });
-  }
-});
-
-// ========== COLLECTION ROUTES ==========
-
-/**
- * POST /api/elspark/collection/upload
- * Upload video to collection (1 elsCoin)
- */
-router.post('/collection/upload', upload.single('video'), validateProfileId, async (req: Request, res: Response) => {
-  try {
-    if (!req.file) {
-      res.status(400).json({ error: 'No video file uploaded' });
-      return;
-    }
-
-    const { profileId, title, description } = req.body;
-
-    if (!title || title.trim().length === 0) {
-      res.status(400).json({ error: 'Video title is required' });
-      return;
-    }
-
-    const result = await elsparkService.uploadToCollection(
-      profileId,
-      req.file,
-      title.trim(),
-      description?.trim()
-    );
-
-    // Emit socket events
-    if (req.app.get('io')) {
-      const io = req.app.get('io');
-      emitCoinUpdate(profileId, result.newBalance, io);
-      emitCollectionUpdate(profileId, io);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Video uploaded to collection successfully',
-      data: {
-        video: result.video,
-        newBalance: result.newBalance
-      }
-    });
-  } catch (error: any) {
-    console.error('Error uploading video to collection:', error);
-    
-    // Clean up uploaded file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
-    res.status(400).json({ 
-      error: error.message || 'Failed to upload video to collection' 
-    });
-  }
-});
-
-/**
- * GET /api/elspark/collection
- * Get user's collection
- */
-router.get('/collection', validateProfileId, async (req: Request, res: Response) => {
-  try {
-    const { profileId } = req.query;
-
-    const collection = await elsparkService.getUserCollection(parseInt(profileId as string));
-
-    res.json({
-      success: true,
-      data: collection
-    });
-  } catch (error: any) {
-    console.error('Error fetching collection:', error);
-    res.status(500).json({ 
-      error: error.message || 'Failed to fetch collection' 
-    });
-  }
-});
-
-/**
- * POST /api/elspark/collection/add/:videoId
- * Purchase video for collection (2 elsCoins)
- */
-router.post('/collection/add/:videoId', validateProfileId, async (req: Request, res: Response) => {
-  try {
-    const { videoId } = req.params;
-    const { profileId } = req.body;
-
-    const result = await elsparkService.purchaseVideo(profileId, videoId);
-
-    // Emit socket events to both buyer and uploader
-    if (req.app.get('io')) {
-      const io = req.app.get('io');
-      emitCoinUpdate(profileId, result.buyerNewBalance, io);
-      emitCoinUpdate(result.uploaderId, result.uploaderNewBalance, io);
-      emitCollectionUpdate(profileId, io);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Video purchased successfully',
-      data: {
-        collectionItem: result.collectionItem,
-        newBalance: result.buyerNewBalance
-      }
-    });
-  } catch (error: any) {
-    console.error('Error purchasing video:', error);
-    res.status(400).json({ 
-      error: error.message || 'Failed to purchase video' 
-    });
-  }
-});
-
-/**
- * DELETE /api/elspark/collection/:videoId
- * Remove video from collection
- */
-router.delete('/collection/:videoId', validateProfileId, async (req: Request, res: Response) => {
-  try {
-    const { videoId } = req.params;
-    const { profileId } = req.body;
-
-    await elsparkService.removeFromCollection(profileId, videoId);
-
-    // Emit socket event
-    if (req.app.get('io')) {
-      const io = req.app.get('io');
-      emitCollectionUpdate(profileId, io);
-    }
-
-    res.json({
-      success: true,
-      message: 'Video removed from collection'
-    });
-  } catch (error: any) {
-    console.error('Error removing from collection:', error);
-    res.status(400).json({ 
-      error: error.message || 'Failed to remove video from collection' 
-    });
-  }
-});
-
-/**
- * POST /api/elspark/collection/post/:videoId
- * Post video from collection to Live TV
- */
-router.post('/collection/post/:videoId', validateProfileId, async (req: Request, res: Response) => {
-  try {
-    const { videoId } = req.params;
-    const { profileId } = req.body;
-
-    const result = await elsparkService.postToLiveTV(profileId, videoId);
-
-    // Emit socket event
-    if (req.app.get('io')) {
-      const io = req.app.get('io');
-      broadcastQueueUpdate(io);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Video posted to Live TV',
-      data: result
-    });
-  } catch (error: any) {
-    console.error('Error posting to Live TV:', error);
-    res.status(400).json({ 
-      error: error.message || 'Failed to post video to Live TV' 
     });
   }
 });
@@ -412,11 +378,11 @@ router.get('/live-tv/history', async (req: Request, res: Response) => {
  * GET /api/elspark/coins/balance
  * Get user's elsCoin balance
  */
-router.get('/coins/balance', validateProfileId, async (req: Request, res: Response) => {
+router.get('/coins/balance', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
-    const { profileId } = req.query;
+    const profileId = res.locals.profileId; // Changed from req.body.profileId
 
-    const balance = await elsparkService.getCoinBalance(parseInt(profileId as string));
+    const balance = await elsparkService.getCoinBalance(profileId);
 
     res.json({
       success: true,
@@ -434,11 +400,11 @@ router.get('/coins/balance', validateProfileId, async (req: Request, res: Respon
  * GET /api/elspark/coins/transactions
  * Get user's transaction history
  */
-router.get('/coins/transactions', validateProfileId, async (req: Request, res: Response) => {
+router.get('/coins/transactions', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
-    const { profileId } = req.query;
+    const profileId = res.locals.profileId; // Changed from req.body.profileId
 
-    const transactions = await elsparkService.getTransactionHistory(parseInt(profileId as string));
+    const transactions = await elsparkService.getTransactionHistory(profileId);
 
     res.json({
       success: true,
