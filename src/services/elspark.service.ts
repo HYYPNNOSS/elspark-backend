@@ -161,7 +161,7 @@ export class ElsparkService {
         }
       });
   
-      const reposterId = currentQueueItem?.uploaderId; // Person who posted to broadcast
+      const reposterId = currentQueueItem?.uploaderId; 
       const originalOwnerId = video.uploaderId; // Original video owner
   
       // 6. Deduct 2 cyberCoins from buyer

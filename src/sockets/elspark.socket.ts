@@ -89,6 +89,10 @@ export function setupElsparkWebSocket(io: Server) {
           }
         });
 
+        setTimeout(() => {
+          checkAndStartPlayback(elsparkNamespace);
+        }, 1000);
+        
         // Broadcast user joined to chat
         elsparkNamespace.to('live-chat').emit('chat:user_joined', {
           username: profile.username,
@@ -401,19 +405,30 @@ export async function checkAndStartPlayback(namespace: any) {
     const current = await elsparkService.getCurrentVideo();
     const queue = await elsparkService.getQueue();
     
-    console.log('Checking playback state:', { 
+    console.log('[PLAYBACK CHECK]', { 
       hasCurrentVideo: !!current, 
-      queueLength: queue.length 
+      queueLength: queue.length,
+      currentVideoState: currentVideoState.video ? 'has video' : 'empty'
     });
     
-    if (!current && queue.length > 0) {
-      console.log('No video playing but queue has videos - starting playback');
+    // Check both: no current video in DB AND no video in state
+    if (!current && !currentVideoState.video && queue.length > 0) {
+      console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
       await playNextVideo(namespace);
       return true;
     }
+    
+    // Also check if state is empty but queue has videos
+    if (!currentVideoState.video && queue.length > 0) {
+      console.log('[PLAYBACK] State empty but queue has videos - starting playback');
+      await playNextVideo(namespace);
+      return true;
+    }
+    
+    console.log('[PLAYBACK] No action needed');
     return false;
   } catch (error) {
-    console.error('Error checking playback:', error);
+    console.error('[PLAYBACK CHECK ERROR]:', error);
     return false;
   }
 }

@@ -111,7 +111,6 @@ model LiveTVQueue {
   position   Int
   status     String       @default("waiting")
   uploaderId Int          
-  reposterId Int?         
   startTime  DateTime?
   endTime    DateTime?
   createdAt  DateTime     @default(now())

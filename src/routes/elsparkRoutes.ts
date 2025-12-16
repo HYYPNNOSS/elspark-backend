@@ -220,7 +220,10 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
       await broadcastQueueUpdate(io);
       
       // Then immediately check and start playback if needed
-      await checkAndStartPlayback(namespace);
+      setTimeout(async () => {
+        const started = await checkAndStartPlayback(namespace);
+        console.log('[POST] Attempted to start playback:', started);
+      }, 500);
     }
 
     res.status(201).json({
