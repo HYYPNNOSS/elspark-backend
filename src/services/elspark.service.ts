@@ -112,17 +112,16 @@ export class ElsparkService {
    */
   async purchaseVideo(profileId: number, videoId: string) {
     return await prisma.$transaction(async (tx) => {
-      // 1. Get buyer profile with account
+      // 1-4. Same as before (get buyer, video, check ownership, check balance)
       const buyer = await tx.profile.findUnique({
         where: { id: profileId },
         include: { account: true }
       });
-
+  
       if (!buyer) {
         throw new Error('Profile not found');
       }
-
-      // 2. Get video with uploader
+  
       const video = await tx.elsparkVideo.findUnique({
         where: { id: videoId },
         include: {
@@ -131,12 +130,11 @@ export class ElsparkService {
           }
         }
       });
-
+  
       if (!video) {
         throw new Error('Video not found');
       }
-
-      // 3. Check if already owns this video
+  
       const existing = await tx.videoOwnership.findUnique({
         where: {
           profileId_videoId: {
@@ -145,31 +143,27 @@ export class ElsparkService {
           }
         }
       });
-
+  
       if (existing) {
         throw new Error('You already own this video');
       }
-
-      // 4. Check buyer balance
+  
       const buyerBalance = buyer.account.cyberCoins.toNumber();
       if (buyerBalance < 2) {
         throw new Error('Insufficient cyberCoins. You need 2 cyberCoins to purchase.');
       }
-
-      // 5. Get all current owners
-      const currentOwners = await tx.videoOwnership.findMany({
-        where: { videoId },
-        include: {
-          profile: {
-            include: { account: true }
-          }
+  
+      // 5. Get the current queue item to find who posted it
+      const currentQueueItem = await tx.liveTVQueue.findFirst({
+        where: { 
+          videoId,
+          status: { in: ['waiting', 'playing'] }
         }
       });
-
-      if (currentOwners.length === 0) {
-        throw new Error('Video has no owners');
-      }
-
+  
+      const reposterId = currentQueueItem?.uploaderId; // Person who posted to broadcast
+      const originalOwnerId = video.uploaderId; // Original video owner
+  
       // 6. Deduct 2 cyberCoins from buyer
       await tx.account.update({
         where: { id: buyer.accountId },
@@ -179,55 +173,73 @@ export class ElsparkService {
           }
         }
       });
-
-      // 7. Distribute 2 coins among existing owners based on ownership share
+  
+      // 7. Distribute coins: 1 to reposter, 1 to original owner
       const ownerUpdates: { profileId: number; amount: number; newBalance: number }[] = [];
-      
-      for (const owner of currentOwners) {
-        const sharePercentage = owner.ownershipShare / 100;
-        const revenueShare = 2 * sharePercentage;
+  
+      if (reposterId && reposterId !== originalOwnerId) {
+        // Different people - give 1 coin to each
         
+        // Give 1 coin to reposter
+        const reposter = await tx.profile.findUnique({
+          where: { id: reposterId },
+          include: { account: true }
+        });
+  
+        if (reposter) {
+          await tx.account.update({
+            where: { id: reposter.accountId },
+            data: {
+              cyberCoins: {
+                increment: 1
+              }
+            }
+          });
+  
+          ownerUpdates.push({
+            profileId: reposterId,
+            amount: 1,
+            newBalance: reposter.account.cyberCoins.toNumber() + 1
+          });
+        }
+  
+        // Give 1 coin to original owner
         await tx.account.update({
-          where: { id: owner.profile.accountId },
+          where: { id: video.uploader.accountId },
           data: {
             cyberCoins: {
-              increment: revenueShare
+              increment: 1
             }
           }
         });
-
+  
         ownerUpdates.push({
-          profileId: owner.profileId,
-          amount: revenueShare,
-          newBalance: owner.profile.account.cyberCoins.toNumber() + revenueShare
+          profileId: originalOwnerId,
+          amount: 1,
+          newBalance: video.uploader.account.cyberCoins.toNumber() + 1
         });
-      }
-
-      // 8. Calculate new ownership shares
-      // New share = 100 / (total_owners + 1)
-      const totalOwners = currentOwners.length;
-      const newOwnerShare = 100 / (totalOwners + 1);
-      const adjustedShare = 100 / (totalOwners + 1);
-
-      // 9. Adjust existing owners' shares proportionally
-      for (const owner of currentOwners) {
-        const currentShare = owner.ownershipShare;
-        const newShare = currentShare * (100 - newOwnerShare) / 100;
-        
-        await tx.videoOwnership.update({
-          where: {
-            profileId_videoId: {
-              profileId: owner.profileId,
-              videoId
-            }
-          },
+  
+      } else {
+        // Same person (or no queue item) - give all 2 coins to original owner
+        await tx.account.update({
+          where: { id: video.uploader.accountId },
           data: {
-            ownershipShare: newShare
+            cyberCoins: {
+              increment: 2
+            }
           }
         });
+  
+        ownerUpdates.push({
+          profileId: originalOwnerId,
+          amount: 2,
+          newBalance: video.uploader.account.cyberCoins.toNumber() + 2
+        });
       }
-
-      // 10. Add buyer as new owner
+  
+      // 8-10. Keep same ownership logic or simplify if you want
+      const newOwnerShare = 50; // Or calculate based on your needs
+  
       const newOwnership = await tx.videoOwnership.create({
         data: {
           videoId,
@@ -237,23 +249,22 @@ export class ElsparkService {
           acquisitionPrice: 2
         }
       });
-
+  
       return {
         ownership: newOwnership,
         buyerNewBalance: buyerBalance - 2,
         ownerUpdates,
-        newOwnershipShare: newOwnerShare
+        newOwnershipShare: newOwnerShare,
+        reposterId
       };
     });
   }
-
   /**
    * Post video from collection to Live TV (FREE - no cost)
    * Must be an owner of the video
    */
   async postToLiveTV(profileId: number, videoId: string) {
     return await prisma.$transaction(async (tx) => {
-      // 1. Check if user owns this video
       const ownership = await tx.videoOwnership.findUnique({
         where: {
           profileId_videoId: {
@@ -263,45 +274,42 @@ export class ElsparkService {
         },
         include: { video: true }
       });
-
+  
       if (!ownership) {
         throw new Error('You must own this video to post it to Live TV');
       }
-
-      // 2. Check if already in queue
+  
       const existingQueue = await tx.liveTVQueue.findFirst({
         where: {
           videoId,
           status: { in: ['waiting', 'playing'] }
         }
       });
-
+  
       if (existingQueue) {
         throw new Error('Video is already in the queue');
       }
-
-      // 3. Get next position
+  
       const lastQueueItem = await tx.liveTVQueue.findFirst({
         orderBy: { position: 'desc' }
       });
       const nextPosition = lastQueueItem ? lastQueueItem.position + 1 : 1;
-
-      // 4. Add to queue
+  
+      // uploaderId here is the person posting (reposter)
       const queueItem = await tx.liveTVQueue.create({
         data: {
           videoId,
           position: nextPosition,
           status: 'waiting',
-          uploaderId: profileId
+          uploaderId: profileId // This tracks who posted it
         }
       });
-
-      // 5. Update video status
+  
       await tx.elsparkVideo.update({
         where: { id: videoId },
         data: { status: 'queued' }
       });
-
+  
       return { queueItem, video: ownership.video };
     });
   }

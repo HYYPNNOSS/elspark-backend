@@ -109,8 +109,9 @@ model LiveTVQueue {
   id         String       @id @default(uuid())
   videoId    String
   position   Int
-  status     String       @default("waiting") // 'waiting', 'playing', 'played'
-  uploaderId Int
+  status     String       @default("waiting")
+  uploaderId Int          
+  reposterId Int?         
   startTime  DateTime?
   endTime    DateTime?
   createdAt  DateTime     @default(now())
