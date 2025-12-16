@@ -425,11 +425,10 @@ export function emitToUser(profileId: number, event: string, data: any, io: Serv
 }
 
 // Utility function to broadcast queue update
-export function broadcastQueueUpdate(io: Server) {
+export async function broadcastQueueUpdate(io: Server) {
   const namespace = io.of('/elspark-tv');
-  elsparkService.getQueue().then(queue => {
-    namespace.to('live-tv-main').emit('video:queue_update', { queue });
-  });
+  const queue = await elsparkService.getQueue();
+  namespace.to('live-tv-main').emit('video:queue_update', { queue });
 }
 
 // Utility function to emit coin update

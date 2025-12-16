@@ -440,26 +440,27 @@ export class ElsparkService {
   /**
    * Get currently playing video
    */
-  async getCurrentVideo() {
-    const current = await prisma.liveTVQueue.findFirst({
-      where: { status: 'playing' },
-      include: {
-        video: {
-          include: {
-            uploader: {
-              select: {
-                id: true,
-                username: true,
-                profilePicture: true
-              }
+  // In elspark.service.ts - getCurrentVideo method
+async getCurrentVideo() {
+  const current = await prisma.liveTVQueue.findFirst({
+    where: { status: 'playing' },
+    include: {
+      video: {
+        include: {
+          uploader: {  // MUST INCLUDE THIS
+            select: {
+              id: true,
+              username: true,
+              profilePicture: true
             }
           }
         }
       }
-    });
+    }
+  });
 
-    return current;
-  }
+  return current;
+}
 
   /**
    * Get video history

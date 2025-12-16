@@ -209,39 +209,18 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     const { videoId } = req.params;
     const { profileId } = req.body;
 
-    console.log(`[POST] Posting video ${videoId} to Live TV by profile ${profileId}`);
-
     const result = await elsparkService.postToLiveTV(profileId, videoId);
-    console.log('[POST] Video added to queue:', result.queueItem.id);
 
-    // Get the IO instance
     if (req.app.get('io')) {
       const io = req.app.get('io');
       const namespace = io.of('/elspark-tv');
-      
-      // Import the helper functions
       const { checkAndStartPlayback, broadcastQueueUpdate } = require('../sockets/elspark.socket');
       
-      console.log('[POST] Broadcasting queue update...');
+      // First broadcast queue update
+      await broadcastQueueUpdate(io);
       
-      // First, broadcast queue update to all clients
-      const queue = await elsparkService.getQueue();
-      namespace.to('live-tv-main').emit('video:queue_update', { queue });
-      
-      // Then check if we need to start playback
-      // Use setImmediate to ensure queue update is sent first
-      setImmediate(async () => {
-        console.log('[POST] Checking playback state...');
-        const current = await elsparkService.getCurrentVideo();
-        
-        if (!current) {
-          console.log('[POST] No video playing - starting playback now');
-          const { playNextVideo } = require('../sockets/elspark.socket');
-          await playNextVideo(namespace);
-        } else {
-          console.log('[POST] Video already playing:', current.video.title);
-        }
-      });
+      // Then immediately check and start playback if needed
+      await checkAndStartPlayback(namespace);
     }
 
     res.status(201).json({
