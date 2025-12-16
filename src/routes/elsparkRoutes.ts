@@ -77,7 +77,17 @@ const validateProfileIdQuery = (req: Request, res: Response, next: Function) => 
  * Upload video to collection (1 elsCoin)
  * User becomes initial owner with 100% ownership
  */
-router.post('/collection/upload', upload.single('video'), validateProfileIdBody, async (req: Request, res: Response) => {
+router.post('/collection/upload', upload.single('video'), async (req: Request, res: Response) => {
+  // Validate profileId after multer parses it
+  const profileId = parseInt(req.body.profileId);
+  
+  if (!profileId || isNaN(profileId)) {
+    res.status(400).json({ error: 'Valid profileId is required' });
+    return;
+  }
+  
+  req.body.profileId = profileId;
+
   try {
     if (!req.file) {
       res.status(400).json({ error: 'No video file uploaded' });
@@ -199,21 +209,39 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     const { videoId } = req.params;
     const { profileId } = req.body;
 
-    const result = await elsparkService.postToLiveTV(profileId, videoId);
+    console.log(`[POST] Posting video ${videoId} to Live TV by profile ${profileId}`);
 
+    const result = await elsparkService.postToLiveTV(profileId, videoId);
+    console.log('[POST] Video added to queue:', result.queueItem.id);
+
+    // Get the IO instance
     if (req.app.get('io')) {
       const io = req.app.get('io');
       const namespace = io.of('/elspark-tv');
       
-      broadcastQueueUpdate(io);
+      // Import the helper functions
+      const { checkAndStartPlayback, broadcastQueueUpdate } = require('../sockets/elspark.socket');
       
-      // Import the helper
-      const { checkAndStartPlayback } = require('../sockets/elspark.socket');
+      console.log('[POST] Broadcasting queue update...');
       
-      // Small delay then check
-      setTimeout(() => {
-        checkAndStartPlayback(namespace);
-      }, 300);
+      // First, broadcast queue update to all clients
+      const queue = await elsparkService.getQueue();
+      namespace.to('live-tv-main').emit('video:queue_update', { queue });
+      
+      // Then check if we need to start playback
+      // Use setImmediate to ensure queue update is sent first
+      setImmediate(async () => {
+        console.log('[POST] Checking playback state...');
+        const current = await elsparkService.getCurrentVideo();
+        
+        if (!current) {
+          console.log('[POST] No video playing - starting playback now');
+          const { playNextVideo } = require('../sockets/elspark.socket');
+          await playNextVideo(namespace);
+        } else {
+          console.log('[POST] Video already playing:', current.video.title);
+        }
+      });
     }
 
     res.status(201).json({
@@ -222,7 +250,7 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
       data: result
     });
   } catch (error: any) {
-    console.error('Error posting to Live TV:', error);
+    console.error('[POST ERROR]:', error);
     res.status(400).json({ 
       error: error.message || 'Failed to post video to Live TV' 
     });

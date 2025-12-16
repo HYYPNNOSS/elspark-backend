@@ -16,9 +16,13 @@ interface VideoQueueItem {
     url: string;
     duration: number;
     uploaderId: number;
+    uploader?: {  // ADD THIS
+      id: number;
+      username: string;
+      profilePicture: string | null;
+    };
   };
 }
-
 interface CurrentVideoState {
   video: VideoQueueItem | null;
   currentTime: number;
@@ -258,7 +262,7 @@ export async function playNextVideo(namespace: any) {
         }
       });
 
-      // Update current state
+      // Update current state - FIX: Include the uploader data
       currentVideoState = {
         video: {
           id: nextVideo.id,
@@ -270,7 +274,8 @@ export async function playNextVideo(namespace: any) {
             title: nextVideo.video.title,
             url: nextVideo.video.url,
             duration: nextVideo.video.duration,
-            uploaderId: nextVideo.video.uploaderId
+            uploaderId: nextVideo.video.uploaderId,
+            uploader: nextVideo.video.uploader // ADD THIS LINE
           }
         },
         currentTime: 0,
@@ -279,6 +284,7 @@ export async function playNextVideo(namespace: any) {
       };
 
       console.log('Broadcasting video:started event for:', nextVideo.video.title);
+      console.log('Current video state:', JSON.stringify(currentVideoState, null, 2));
 
       // Broadcast video started
       namespace.to('live-tv-main').emit('video:started', {
@@ -330,7 +336,7 @@ async function loadInitialVideo(namespace: any) {
     });
 
     if (playingVideo) {
-      // Resume existing playing video
+      // Resume existing playing video - FIX: Include uploader
       currentVideoState = {
         video: {
           id: playingVideo.id,
@@ -342,13 +348,15 @@ async function loadInitialVideo(namespace: any) {
             title: playingVideo.video.title,
             url: playingVideo.video.url,
             duration: playingVideo.video.duration,
-            uploaderId: playingVideo.video.uploaderId
+            uploaderId: playingVideo.video.uploaderId,
+            uploader: playingVideo.video.uploader // ADD THIS LINE
           }
         },
         currentTime: 0,
         isPlaying: true,
         startedAt: Date.now()
       };
+      console.log('Resumed existing playing video:', playingVideo.video.title);
     } else {
       // No playing video, start the first one in queue
       console.log('No playing video found, attempting to play next video');
@@ -358,6 +366,7 @@ async function loadInitialVideo(namespace: any) {
     console.error('Error loading initial video:', error);
   }
 }
+
 
 function startVideoSyncBroadcast(namespace: any) {
   // Clear existing interval if any
