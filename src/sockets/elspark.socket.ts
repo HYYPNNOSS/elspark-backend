@@ -89,9 +89,9 @@ export function setupElsparkWebSocket(io: Server) {
           }
         });
 
-        setTimeout(() => {
-          checkAndStartPlayback(elsparkNamespace);
-        }, 1000);
+        setImmediate(async () => {
+          await checkAndStartPlayback(elsparkNamespace);
+        });
         
         // Broadcast user joined to chat
         elsparkNamespace.to('live-chat').emit('chat:user_joined', {
@@ -408,24 +408,23 @@ export async function checkAndStartPlayback(namespace: any) {
     console.log('[PLAYBACK CHECK]', { 
       hasCurrentVideo: !!current, 
       queueLength: queue.length,
-      currentVideoState: currentVideoState.video ? 'has video' : 'empty'
+      currentVideoState: currentVideoState.video ? 'has video' : 'empty',
+      currentVideoPlaying: currentVideoState.isPlaying
     });
     
-    // Check both: no current video in DB AND no video in state
-    if (!current && !currentVideoState.video && queue.length > 0) {
+    // Check if nothing is playing but queue has videos
+    const shouldStart = (
+      (!current || !currentVideoState.video || !currentVideoState.isPlaying) && 
+      queue.length > 0
+    );
+    
+    if (shouldStart) {
       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
       await playNextVideo(namespace);
       return true;
     }
     
-    // Also check if state is empty but queue has videos
-    if (!currentVideoState.video && queue.length > 0) {
-      console.log('[PLAYBACK] State empty but queue has videos - starting playback');
-      await playNextVideo(namespace);
-      return true;
-    }
-    
-    console.log('[PLAYBACK] No action needed');
+    console.log('[PLAYBACK] No action needed - video already playing or queue empty');
     return false;
   } catch (error) {
     console.error('[PLAYBACK CHECK ERROR]:', error);
