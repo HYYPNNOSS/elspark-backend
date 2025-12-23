@@ -30,79 +30,85 @@ export class ElsparkService {
     title: string,
     description?: string
   ) {
-    // Get video duration BEFORE transaction
+    // ✅ Move ALL heavy operations BEFORE the transaction
+    console.log('[UPLOAD] Starting pre-transaction operations...');
+    
+    // 1. Get video duration FIRST
     const duration = await this.getVideoDuration(videoFile.path);
-
-    // Upload to Wasabi BEFORE transaction
+    console.log('[UPLOAD] Got duration:', duration);
+  
+    // 2. Upload to Wasabi FIRST
     const wasabiKey = `collections/${profileId}/${Date.now()}-${videoFile.originalname}`;
     const wasabiUrl = await this.uploadToWasabi(videoFile, wasabiKey);
-
-    // Delete local temp file
+    console.log('[UPLOAD] Uploaded to Wasabi:', wasabiUrl);
+  
+    // 3. Delete temp file FIRST
     if (fs.existsSync(videoFile.path)) {
       fs.unlinkSync(videoFile.path);
     }
-
-    // Now run transaction with all heavy work done
-    return await prisma.$transaction(async (tx) => {
-      // 1. Get profile with account
-      const profile = await tx.profile.findUnique({
-        where: { id: profileId },
-        include: { account: true }
-      });
-
-      if (!profile) {
-        throw new Error('Profile not found');
-      }
-
-      // 2. Check cyberCoin balance
-      const balance = profile.account.cyberCoins.toNumber();
-      if (balance < 1) {
-        throw new Error('Insufficient cyberCoins. You need 1 cyberCoin to upload.');
-      }
-
-      // 3. Deduct 1 cyberCoin
-      await tx.account.update({
-        where: { id: profile.accountId },
-        data: {
-          cyberCoins: {
-            decrement: 1
+  
+    // ✅ Now run a FAST transaction with just database operations
+    console.log('[UPLOAD] Starting transaction...');
+    
+    try {
+      return await prisma.$transaction(async (tx) => {
+        // Fast DB operations only
+        const profile = await tx.profile.findUnique({
+          where: { id: profileId },
+          include: { account: true }
+        });
+  
+        if (!profile) {
+          throw new Error('Profile not found');
+        }
+  
+        const balance = profile.account.cyberCoins.toNumber();
+        if (balance < 1) {
+          throw new Error('Insufficient cyberCoins. You need 1 cyberCoin to upload.');
+        }
+  
+        await tx.account.update({
+          where: { id: profile.accountId },
+          data: { cyberCoins: { decrement: 1 } }
+        });
+  
+        const video = await tx.elsparkVideo.create({
+          data: {
+            title,
+            description,
+            url: wasabiUrl,
+            filename: videoFile.originalname,
+            duration,
+            fileSize: videoFile.size,
+            uploaderId: profileId,
+            source: 'collection',
+            status: 'in_collection'
           }
-        }
+        });
+  
+        await tx.videoOwnership.create({
+          data: {
+            videoId: video.id,
+            profileId,
+            ownershipShare: 100.0,
+            acquisitionType: 'upload',
+            acquisitionPrice: 1
+          }
+        });
+  
+        return {
+          video,
+          newBalance: balance - 1
+        };
+      }, {
+        timeout: 10000 // Reduced to 10 seconds - should be plenty for DB ops only
       });
-
-      // 4. Create video record
-      const video = await tx.elsparkVideo.create({
-        data: {
-          title,
-          description,
-          url: wasabiUrl,
-          filename: videoFile.originalname,
-          duration,
-          fileSize: videoFile.size,
-          uploaderId: profileId,
-          source: 'collection',
-          status: 'in_collection'
-        }
-      });
-
-      // 5. Add to user's collection with 100% ownership
-      await tx.videoOwnership.create({
-        data: {
-          videoId: video.id,
-          profileId,
-          ownershipShare: 100.0,
-          acquisitionType: 'upload',
-          acquisitionPrice: 1
-        }
-      });
-
-      return {
-        video,
-        newBalance: balance - 1
-      };
-    }, {
-      timeout: 100000 
-    });
+    } catch (error) {
+      // If transaction fails, clean up the uploaded file from Wasabi
+      console.error('[UPLOAD] Transaction failed, cleaning up Wasabi upload...');
+      await this.deleteFromWasabi(wasabiUrl);
+      throw error;
+    }
   }
 
   /**
