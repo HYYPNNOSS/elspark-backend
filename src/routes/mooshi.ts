@@ -15,6 +15,7 @@ interface AuthRequest extends Request {
   };
 }
 
+
 interface BotPersonality {
   prompt: string;
   model: string;
