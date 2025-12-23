@@ -218,14 +218,17 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
       
       console.log('[POST] Video posted to queue, checking playback state...');
       
-      // First broadcast queue update
+      // Broadcast queue update first
       await broadcastQueueUpdate(io);
       
-      // Immediately try to start playback (no delay)
+      // ADD THIS: Small delay to ensure DB commit is visible
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Now check playback
       const started = await checkAndStartPlayback(namespace);
       console.log('[POST] Playback check result:', started);
       
-      // If it didn't start, try again after a short delay
+      // Retry mechanism stays the same
       if (!started) {
         setTimeout(async () => {
           console.log('[POST] Retrying playback check...');
@@ -246,6 +249,48 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     });
   }
 });
+//  router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
+//   try {
+//     const { videoId } = req.params;
+//     const { profileId } = req.body;
+
+//     const result = await elsparkService.postToLiveTV(profileId, videoId);
+
+//     if (req.app.get('io')) {
+//       const io = req.app.get('io');
+//       const namespace = io.of('/elspark-tv');
+//       const { checkAndStartPlayback, broadcastQueueUpdate } = require('../sockets/elspark.socket');
+      
+//       console.log('[POST] Video posted to queue, checking playback state...');
+      
+//       // First broadcast queue update
+//       await broadcastQueueUpdate(io);
+      
+//       // Immediately try to start playback (no delay)
+//       const started = await checkAndStartPlayback(namespace);
+//       console.log('[POST] Playback check result:', started);
+      
+//       // If it didn't start, try again after a short delay
+//       if (!started) {
+//         setTimeout(async () => {
+//           console.log('[POST] Retrying playback check...');
+//           await checkAndStartPlayback(namespace);
+//         }, 1000);
+//       }
+//     }
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Video posted to Live TV',
+//       data: result
+//     });
+//   } catch (error: any) {
+//     console.error('[POST ERROR]:', error);
+//     res.status(400).json({ 
+//       error: error.message || 'Failed to post video to Live TV' 
+//     });
+//   }
+// });
 
 /**
  * DELETE /api/elspark/collection/:videoId

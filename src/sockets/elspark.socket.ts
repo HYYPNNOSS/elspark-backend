@@ -399,11 +399,43 @@ function startVideoSyncBroadcast(namespace: any) {
   }, 5000);
 }
 
-
 export async function checkAndStartPlayback(namespace: any) {
   try {
-    const current = await elsparkService.getCurrentVideo();
-    const queue = await elsparkService.getQueue();
+    // ADD THIS: Get fresh data from DB
+    const current = await prisma.liveTVQueue.findFirst({
+      where: { status: 'playing' },
+      include: {
+        video: {
+          include: {
+            uploader: {
+              select: {
+                id: true,
+                username: true,
+                profilePicture: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    const queue = await prisma.liveTVQueue.findMany({
+      where: { status: 'waiting' },
+      orderBy: { position: 'asc' },
+      include: {
+        video: {
+          include: {
+            uploader: {
+              select: {
+                id: true,
+                username: true,
+                profilePicture: true
+              }
+            }
+          }
+        }
+      }
+    });
     
     console.log('[PLAYBACK CHECK]', { 
       hasCurrentVideo: !!current, 
@@ -412,25 +444,52 @@ export async function checkAndStartPlayback(namespace: any) {
       currentVideoPlaying: currentVideoState.isPlaying
     });
     
-    // Check if nothing is playing but queue has videos
-    const shouldStart = (
-      (!current || !currentVideoState.video || !currentVideoState.isPlaying) && 
-      queue.length > 0
-    );
-    
-    if (shouldStart) {
+    // FIX: Simplified logic - if nothing playing and queue exists, start
+    if (!current && queue.length > 0) {
       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
       await playNextVideo(namespace);
       return true;
     }
     
-    console.log('[PLAYBACK] No action needed - video already playing or queue empty');
+    console.log('[PLAYBACK] No action needed');
     return false;
   } catch (error) {
     console.error('[PLAYBACK CHECK ERROR]:', error);
     return false;
   }
 }
+
+// export async function checkAndStartPlayback(namespace: any) {
+//   try {
+//     const current = await elsparkService.getCurrentVideo();
+//     const queue = await elsparkService.getQueue();
+    
+//     console.log('[PLAYBACK CHECK]', { 
+//       hasCurrentVideo: !!current, 
+//       queueLength: queue.length,
+//       currentVideoState: currentVideoState.video ? 'has video' : 'empty',
+//       currentVideoPlaying: currentVideoState.isPlaying
+//     });
+    
+//     // Check if nothing is playing but queue has videos
+//     const shouldStart = (
+//       (!current || !currentVideoState.video || !currentVideoState.isPlaying) && 
+//       queue.length > 0
+//     );
+    
+//     if (shouldStart) {
+//       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
+//       await playNextVideo(namespace);
+//       return true;
+//     }
+    
+//     console.log('[PLAYBACK] No action needed - video already playing or queue empty');
+//     return false;
+//   } catch (error) {
+//     console.error('[PLAYBACK CHECK ERROR]:', error);
+//     return false;
+//   }
+// }
 
 // Utility function to emit to specific user
 export function emitToUser(profileId: number, event: string, data: any, io: Server) {

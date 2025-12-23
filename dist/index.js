@@ -35,7 +35,7 @@ const prisma = new client_1.PrismaClient();
 const server = http_1.default.createServer(app);
 const allowedOrigins = [
     "https://elspark-frontend.vercel.app",
-    "http://localhost:5000",
+    "https://elspark-backend-11.onrender.com",
 ];
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
