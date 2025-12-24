@@ -214,26 +214,23 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     if (req.app.get('io')) {
       const io = req.app.get('io');
       const namespace = io.of('/elspark-tv');
-      const { checkAndStartPlayback, broadcastQueueUpdate } = require('../sockets/elspark.socket');
+      const { playNextVideo, broadcastQueueUpdate } = require('../sockets/elspark.socket');
       
-      console.log('[POST] Video posted to queue, checking playback state...');
+      console.log('[POST] Video posted to queue');
       
-      // Broadcast queue update first
+      // Broadcast queue update
       await broadcastQueueUpdate(io);
       
-      // CRITICAL FIX: Add a longer delay to ensure DB transaction is fully committed
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Now check playback
-      const started = await checkAndStartPlayback(namespace);
-      console.log('[POST] Playback check result:', started);
-      
-      // Backup retry with longer delay
-      if (!started) {
+      // If flag says we should start playback, do it immediately
+      if (result.shouldStartPlayback) {
+        console.log('[POST] No video playing, starting playback immediately');
+        
+        // Small delay to ensure HTTP response is sent
         setTimeout(async () => {
-          console.log('[POST] Retrying playback check after 2s...');
-          await checkAndStartPlayback(namespace);
-        }, 2000);
+          await playNextVideo(namespace);
+        }, 100);
+      } else {
+        console.log('[POST] Video already playing, added to queue');
       }
     }
 

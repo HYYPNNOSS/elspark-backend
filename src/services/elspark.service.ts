@@ -270,7 +270,7 @@ export class ElsparkService {
    * Must be an owner of the video
    */
   async postToLiveTV(profileId: number, videoId: string) {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const ownership = await tx.videoOwnership.findUnique({
         where: {
           profileId_videoId: {
@@ -301,13 +301,12 @@ export class ElsparkService {
       });
       const nextPosition = lastQueueItem ? lastQueueItem.position + 1 : 1;
   
-      // uploaderId here is the person posting (reposter)
       const queueItem = await tx.liveTVQueue.create({
         data: {
           videoId,
           position: nextPosition,
           status: 'waiting',
-          uploaderId: profileId // This tracks who posted it
+          uploaderId: profileId
         }
       });
   
@@ -316,9 +315,24 @@ export class ElsparkService {
         data: { status: 'queued' }
       });
   
-      return { queueItem, video: ownership.video };
+      // CHECK IF NOTHING IS PLAYING - WITHIN SAME TRANSACTION
+      const currentlyPlaying = await tx.liveTVQueue.findFirst({
+        where: { status: 'playing' }
+      });
+  
+      return { 
+        queueItem, 
+        video: ownership.video,
+        shouldStartPlayback: !currentlyPlaying // Flag to start playback
+      };
     });
+  
+    return result;
   }
+
+  // nooo
+
+  
 
   /**
    * Get user's owned videos (their collection)
