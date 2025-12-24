@@ -401,7 +401,11 @@ function startVideoSyncBroadcast(namespace: any) {
 
 export async function checkAndStartPlayback(namespace: any) {
   try {
-    // ADD THIS: Get fresh data from DB
+    console.log('[PLAYBACK CHECK] Starting...');
+    
+    // Get fresh data from DB with a small delay to ensure transaction visibility
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     const current = await prisma.liveTVQueue.findFirst({
       where: { status: 'playing' },
       include: {
@@ -441,11 +445,12 @@ export async function checkAndStartPlayback(namespace: any) {
       hasCurrentVideo: !!current, 
       queueLength: queue.length,
       currentVideoState: currentVideoState.video ? 'has video' : 'empty',
-      currentVideoPlaying: currentVideoState.isPlaying
+      currentVideoPlaying: currentVideoState.isPlaying,
+      queueFirstItem: queue[0]?.video?.title || 'none'
     });
     
-    // FIX: Simplified logic - if nothing playing and queue exists, start
-    if (!current && queue.length > 0) {
+    // Check if nothing is playing AND queue has videos
+    if (!current && queue.length > 0 && !currentVideoState.isPlaying) {
       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
       await playNextVideo(namespace);
       return true;

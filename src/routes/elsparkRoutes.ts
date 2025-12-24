@@ -221,19 +221,19 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
       // Broadcast queue update first
       await broadcastQueueUpdate(io);
       
-      // ADD THIS: Small delay to ensure DB commit is visible
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // CRITICAL FIX: Add a longer delay to ensure DB transaction is fully committed
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Now check playback
       const started = await checkAndStartPlayback(namespace);
       console.log('[POST] Playback check result:', started);
       
-      // Retry mechanism stays the same
+      // Backup retry with longer delay
       if (!started) {
         setTimeout(async () => {
-          console.log('[POST] Retrying playback check...');
+          console.log('[POST] Retrying playback check after 2s...');
           await checkAndStartPlayback(namespace);
-        }, 1000);
+        }, 2000);
       }
     }
 
