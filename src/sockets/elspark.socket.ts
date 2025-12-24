@@ -226,8 +226,11 @@ export function setupElsparkWebSocket(io: Server) {
 
 export async function playNextVideo(namespace: any) {
   try {
+    console.log('[PLAY NEXT] Starting playNextVideo...');
+    
     // Mark current video as played
     if (currentVideoState.video) {
+      console.log('[PLAY NEXT] Marking current video as played:', currentVideoState.video.video.title);
       await prisma.liveTVQueue.update({
         where: { id: currentVideoState.video.id },
         data: { 
@@ -237,7 +240,9 @@ export async function playNextVideo(namespace: any) {
       });
     }
 
-    // Get next video from queue
+    // Get next video from queue - with a small delay to ensure transaction visibility
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
     const nextVideo = await prisma.liveTVQueue.findFirst({
       where: { status: 'waiting' },
       orderBy: { position: 'asc' },
@@ -256,6 +261,8 @@ export async function playNextVideo(namespace: any) {
       }
     });
 
+    console.log('[PLAY NEXT] Found next video:', nextVideo ? nextVideo.video.title : 'none');
+
     if (nextVideo) {
       // Update queue item status
       await prisma.liveTVQueue.update({
@@ -266,7 +273,7 @@ export async function playNextVideo(namespace: any) {
         }
       });
 
-      // Update current state - FIX: Include the uploader data
+      // Update current state
       currentVideoState = {
         video: {
           id: nextVideo.id,
@@ -279,7 +286,7 @@ export async function playNextVideo(namespace: any) {
             url: nextVideo.video.url,
             duration: nextVideo.video.duration,
             uploaderId: nextVideo.video.uploaderId,
-            uploader: nextVideo.video.uploader // ADD THIS LINE
+            uploader: nextVideo.video.uploader
           }
         },
         currentTime: 0,
@@ -287,23 +294,28 @@ export async function playNextVideo(namespace: any) {
         startedAt: Date.now()
       };
 
-      console.log('Broadcasting video:started event for:', nextVideo.video.title);
-      console.log('Current video state:', JSON.stringify(currentVideoState, null, 2));
+      console.log('[PLAY NEXT] Broadcasting video:started event for:', nextVideo.video.title);
 
-      // Broadcast video started
+      // Broadcast video started - THIS IS CRITICAL
       namespace.to('live-tv-main').emit('video:started', {
         video: currentVideoState.video,
         timestamp: new Date().toISOString()
       });
+
+      // Small delay to ensure emission completes
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Broadcast queue update
       const updatedQueue = await elsparkService.getQueue();
       namespace.to('live-tv-main').emit('video:queue_update', {
         queue: updatedQueue
       });
+      
+      console.log('[PLAY NEXT] Successfully started video:', nextVideo.video.title);
+      return true;
     } else {
       // No videos in queue
-      console.log('No videos in queue, emitting queue_empty');
+      console.log('[PLAY NEXT] No videos in queue, emitting queue_empty');
       currentVideoState = {
         video: null,
         currentTime: 0,
@@ -312,9 +324,11 @@ export async function playNextVideo(namespace: any) {
       };
 
       namespace.to('live-tv-main').emit('video:queue_empty');
+      return false;
     }
   } catch (error) {
-    console.error('Error playing next video:', error);
+    console.error('[PLAY NEXT ERROR]:', error);
+    return false;
   }
 }
 

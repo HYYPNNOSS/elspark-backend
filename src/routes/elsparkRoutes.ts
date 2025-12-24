@@ -209,43 +209,50 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     const { videoId } = req.params;
     const { profileId } = req.body;
 
+    console.log('[ROUTE] POST request received - videoId:', videoId, 'profileId:', profileId);
+
     const result = await elsparkService.postToLiveTV(profileId, videoId);
+
+    console.log('[ROUTE] Service returned result:', {
+      queueItemId: result.queueItem.id,
+      shouldStartPlayback: result.shouldStartPlayback
+    });
 
     if (req.app.get('io')) {
       const io = req.app.get('io');
       const namespace = io.of('/elspark-tv');
       const { playNextVideo, broadcastQueueUpdate } = require('../sockets/elspark.socket');
       
-      console.log('[POST] Video posted to queue');
-      
-      // Broadcast queue update
+      console.log('[ROUTE] Broadcasting queue update...');
       await broadcastQueueUpdate(io);
       
-      // If flag says we should start playback, do it immediately
       if (result.shouldStartPlayback) {
-        console.log('[POST] No video playing, starting playback immediately');
+        console.log('[ROUTE] Should start playback - calling playNextVideo NOW (before response)');
         
-        // Small delay to ensure HTTP response is sent
-        setTimeout(async () => {
-          await playNextVideo(namespace);
-        }, 100);
+        // CRITICAL FIX: Call playNextVideo BEFORE sending response
+        // This ensures video starts before client receives confirmation
+        await playNextVideo(namespace);
+        
+        console.log('[ROUTE] playNextVideo completed, now sending response');
       } else {
-        console.log('[POST] Video already playing, added to queue');
+        console.log('[ROUTE] Video already playing, just added to queue');
       }
     }
 
+    // Response sent AFTER playback has started
     res.status(201).json({
       success: true,
       message: 'Video posted to Live TV',
       data: result
     });
   } catch (error: any) {
-    console.error('[POST ERROR]:', error);
+    console.error('[ROUTE ERROR]:', error);
     res.status(400).json({ 
       error: error.message || 'Failed to post video to Live TV' 
     });
   }
 });
+
 //  router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
 //   try {
 //     const { videoId } = req.params;
