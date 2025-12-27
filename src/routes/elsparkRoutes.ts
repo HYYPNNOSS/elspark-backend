@@ -122,6 +122,18 @@ router.post('/collection/upload', upload.single('video'), async (req: Request, r
   }
 });
 
+router.get('/live-tv/health', async (req, res) => {
+  const queue = await elsparkService.getQueue();
+  const current = await elsparkService.getCurrentVideo();
+  
+  res.json({
+    isPlaying: !!current,
+    queueLength: queue.length,
+    currentVideo: current?.video.title || null,
+    uptime: process.uptime()
+  });
+});
+
 router.get('/collection', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
     const profileId = res.locals.profileId;

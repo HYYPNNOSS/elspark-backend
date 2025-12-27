@@ -47,6 +47,14 @@ export function setupElsparkWebSocket(io: Server) {
 
   startVideoSyncBroadcast(elsparkNamespace);
 
+  setInterval(async () => {
+    if (!currentVideoState.isPlaying) {
+      console.log('[SAFETY CHECK] No video playing, checking queue...');
+      await checkAndStartPlayback(elsparkNamespace);
+    }
+  }, 30000);
+
+  
   elsparkNamespace.on('connection', async (socket: Socket) => {
     console.log('ElSpark TV client connected:', socket.id);
 
