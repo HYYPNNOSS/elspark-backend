@@ -16,13 +16,14 @@ interface VideoQueueItem {
     url: string;
     duration: number;
     uploaderId: number;
-    uploader?: {  // ADD THIS
+    uploader?: {
       id: number;
       username: string;
       profilePicture: string | null;
     };
   };
 }
+
 interface CurrentVideoState {
   video: VideoQueueItem | null;
   currentTime: number;
@@ -38,19 +39,17 @@ let currentVideoState: CurrentVideoState = {
 };
 
 let videoSyncInterval: NodeJS.Timeout | null = null;
-const activeElsparkUsers = new Map<number, string>(); // profileId -> socketId
-const recentChatMessages: any[] = []; // Store last 50 messages
+const activeElsparkUsers = new Map<number, string>();
+const recentChatMessages: any[] = [];
 
 export function setupElsparkWebSocket(io: Server) {
   const elsparkNamespace = io.of('/elspark-tv');
 
-  // Start video sync broadcaster
   startVideoSyncBroadcast(elsparkNamespace);
 
   elsparkNamespace.on('connection', async (socket: Socket) => {
     console.log('ElSpark TV client connected:', socket.id);
 
-    // Join main rooms
     socket.join('live-tv-main');
     socket.join('live-chat');
 
@@ -58,11 +57,9 @@ export function setupElsparkWebSocket(io: Server) {
       try {
         const { profileId } = data;
         
-        // Track user
         activeElsparkUsers.set(profileId, socket.id);
         socket.join(`user:${profileId}`);
 
-        // Get user profile with account
         const profile = await prisma.profile.findUnique({
           where: { id: profileId },
           include: { account: true }
@@ -73,7 +70,6 @@ export function setupElsparkWebSocket(io: Server) {
           return;
         }
 
-        // Send initial state to the new user
         const queue = await elsparkService.getQueue();
         const currentVideo = await elsparkService.getCurrentVideo();
         
@@ -89,11 +85,9 @@ export function setupElsparkWebSocket(io: Server) {
           }
         });
 
-        setImmediate(async () => {
-          await checkAndStartPlayback(elsparkNamespace);
-        });
+        // Check if we need to start playback (for late joiners)
+        setTimeout(() => checkAndStartPlayback(elsparkNamespace), 500);
         
-        // Broadcast user joined to chat
         elsparkNamespace.to('live-chat').emit('chat:user_joined', {
           username: profile.username,
           profileId: profile.id,
@@ -107,7 +101,6 @@ export function setupElsparkWebSocket(io: Server) {
       }
     });
 
-    // Chat message handler
     socket.on('chat:send_message', async (data: { profileId: number; message: string }) => {
       try {
         const { profileId, message } = data;
@@ -135,13 +128,11 @@ export function setupElsparkWebSocket(io: Server) {
           timestamp: new Date().toISOString()
         };
 
-        // Store in memory (last 50)
         recentChatMessages.push(chatMessage);
         if (recentChatMessages.length > 50) {
           recentChatMessages.shift();
         }
 
-        // Broadcast to all users in chat
         elsparkNamespace.to('live-chat').emit('chat:message', chatMessage);
       } catch (error) {
         console.error('Error sending chat message:', error);
@@ -149,7 +140,6 @@ export function setupElsparkWebSocket(io: Server) {
       }
     });
 
-    // Video ended - play next
     socket.on('video:ended', async () => {
       try {
         await playNextVideo(elsparkNamespace);
@@ -158,10 +148,8 @@ export function setupElsparkWebSocket(io: Server) {
       }
     });
 
-    // Admin controls
     socket.on('video:skip', async (data: { profileId: number }) => {
       try {
-        // TODO: Add admin check here
         await playNextVideo(elsparkNamespace);
       } catch (error) {
         console.error('Error skipping video:', error);
@@ -183,7 +171,6 @@ export function setupElsparkWebSocket(io: Server) {
       });
     });
 
-    // User leaves
     socket.on('user:leave', async (data: { profileId: number }) => {
       try {
         const { profileId } = data;
@@ -206,11 +193,9 @@ export function setupElsparkWebSocket(io: Server) {
       }
     });
 
-    // Disconnect handler
     socket.on('disconnect', () => {
       console.log('ElSpark TV client disconnected:', socket.id);
       
-      // Find and remove user from active users
       for (const [profileId, socketId] of activeElsparkUsers.entries()) {
         if (socketId === socket.id) {
           activeElsparkUsers.delete(profileId);
@@ -220,13 +205,16 @@ export function setupElsparkWebSocket(io: Server) {
     });
   });
 
-  // Load initial video if none playing
   loadInitialVideo(elsparkNamespace);
 }
 
-export async function playNextVideo(namespace: any) {
+// CRITICAL FIX: Added retry logic with exponential backoff
+export async function playNextVideo(namespace: any, retryCount = 0): Promise<boolean> {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 200; // Start with 200ms
+  
   try {
-    console.log('[PLAY NEXT] Starting playNextVideo...');
+    console.log(`[PLAY NEXT] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
     
     // Mark current video as played
     if (currentVideoState.video) {
@@ -238,11 +226,12 @@ export async function playNextVideo(namespace: any) {
           endTime: new Date()
         }
       });
+      
+      // Wait for DB to commit
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Get next video from queue - with a small delay to ensure transaction visibility
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
+    // Get next video with fresh query
     const nextVideo = await prisma.liveTVQueue.findFirst({
       where: { status: 'waiting' },
       orderBy: { position: 'asc' },
@@ -296,14 +285,11 @@ export async function playNextVideo(namespace: any) {
 
       console.log('[PLAY NEXT] Broadcasting video:started event for:', nextVideo.video.title);
 
-      // Broadcast video started - THIS IS CRITICAL
+      // Broadcast video started
       namespace.to('live-tv-main').emit('video:started', {
         video: currentVideoState.video,
         timestamp: new Date().toISOString()
       });
-
-      // Small delay to ensure emission completes
-      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Broadcast queue update
       const updatedQueue = await elsparkService.getQueue();
@@ -313,9 +299,15 @@ export async function playNextVideo(namespace: any) {
       
       console.log('[PLAY NEXT] Successfully started video:', nextVideo.video.title);
       return true;
+    } else if (retryCount < MAX_RETRIES) {
+      // Retry with exponential backoff
+      const delay = RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`[PLAY NEXT] No video found, retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return playNextVideo(namespace, retryCount + 1);
     } else {
-      // No videos in queue
-      console.log('[PLAY NEXT] No videos in queue, emitting queue_empty');
+      // No videos in queue after retries
+      console.log('[PLAY NEXT] No videos in queue after retries, emitting queue_empty');
       currentVideoState = {
         video: null,
         currentTime: 0,
@@ -328,14 +320,20 @@ export async function playNextVideo(namespace: any) {
     }
   } catch (error) {
     console.error('[PLAY NEXT ERROR]:', error);
+    
+    if (retryCount < MAX_RETRIES) {
+      const delay = RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`[PLAY NEXT] Error occurred, retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return playNextVideo(namespace, retryCount + 1);
+    }
+    
     return false;
   }
 }
 
-
 async function loadInitialVideo(namespace: any) {
   try {
-    // Check if there's a currently playing video
     const playingVideo = await prisma.liveTVQueue.findFirst({
       where: { status: 'playing' },
       include: {
@@ -354,7 +352,6 @@ async function loadInitialVideo(namespace: any) {
     });
 
     if (playingVideo) {
-      // Resume existing playing video - FIX: Include uploader
       currentVideoState = {
         video: {
           id: playingVideo.id,
@@ -367,7 +364,7 @@ async function loadInitialVideo(namespace: any) {
             url: playingVideo.video.url,
             duration: playingVideo.video.duration,
             uploaderId: playingVideo.video.uploaderId,
-            uploader: playingVideo.video.uploader // ADD THIS LINE
+            uploader: playingVideo.video.uploader
           }
         },
         currentTime: 0,
@@ -376,7 +373,6 @@ async function loadInitialVideo(namespace: any) {
       };
       console.log('Resumed existing playing video:', playingVideo.video.title);
     } else {
-      // No playing video, start the first one in queue
       console.log('No playing video found, attempting to play next video');
       await playNextVideo(namespace);
     }
@@ -385,14 +381,11 @@ async function loadInitialVideo(namespace: any) {
   }
 }
 
-
 function startVideoSyncBroadcast(namespace: any) {
-  // Clear existing interval if any
   if (videoSyncInterval) {
     clearInterval(videoSyncInterval);
   }
 
-  // Broadcast current video state every 5 seconds
   videoSyncInterval = setInterval(() => {
     if (currentVideoState.video && currentVideoState.isPlaying) {
       const elapsed = (Date.now() - currentVideoState.startedAt) / 1000;
@@ -405,7 +398,6 @@ function startVideoSyncBroadcast(namespace: any) {
         serverTime: Date.now()
       });
 
-      // Check if video should end
       if (currentVideoState.currentTime >= currentVideoState.video.video.duration) {
         playNextVideo(namespace);
       }
@@ -413,122 +405,103 @@ function startVideoSyncBroadcast(namespace: any) {
   }, 5000);
 }
 
-export async function checkAndStartPlayback(namespace: any) {
+// IMPROVED: More robust playback check with database polling
+export async function checkAndStartPlayback(namespace: any, retryCount = 0): Promise<boolean> {
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY = 300;
+  
   try {
-    console.log('[PLAYBACK CHECK] Starting...');
+    console.log(`[PLAYBACK CHECK] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
     
-    // Get fresh data from DB with a small delay to ensure transaction visibility
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    const current = await prisma.liveTVQueue.findFirst({
-      where: { status: 'playing' },
-      include: {
-        video: {
-          include: {
-            uploader: {
-              select: {
-                id: true,
-                username: true,
-                profilePicture: true
+    // Force fresh query with timeout
+    const [current, queue] = await Promise.all([
+      prisma.liveTVQueue.findFirst({
+        where: { status: 'playing' },
+        include: {
+          video: {
+            include: {
+              uploader: {
+                select: {
+                  id: true,
+                  username: true,
+                  profilePicture: true
+                }
               }
             }
           }
         }
-      }
-    });
-    
-    const queue = await prisma.liveTVQueue.findMany({
-      where: { status: 'waiting' },
-      orderBy: { position: 'asc' },
-      include: {
-        video: {
-          include: {
-            uploader: {
-              select: {
-                id: true,
-                username: true,
-                profilePicture: true
+      }),
+      prisma.liveTVQueue.findMany({
+        where: { status: 'waiting' },
+        orderBy: { position: 'asc' },
+        take: 5, // Only check first 5
+        include: {
+          video: {
+            include: {
+              uploader: {
+                select: {
+                  id: true,
+                  username: true,
+                  profilePicture: true
+                }
               }
             }
           }
         }
-      }
-    });
+      })
+    ]);
     
     console.log('[PLAYBACK CHECK]', { 
       hasCurrentVideo: !!current, 
       queueLength: queue.length,
       currentVideoState: currentVideoState.video ? 'has video' : 'empty',
       currentVideoPlaying: currentVideoState.isPlaying,
-      queueFirstItem: queue[0]?.video?.title || 'none'
+      queueFirstItem: queue[0]?.video?.title || 'none',
+      attempt: retryCount + 1
     });
     
     // Check if nothing is playing AND queue has videos
     if (!current && queue.length > 0 && !currentVideoState.isPlaying) {
       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
-      await playNextVideo(namespace);
-      return true;
+      return await playNextVideo(namespace);
+    }
+    
+    // Retry if we expect a video but don't see it yet
+    if (!current && !currentVideoState.isPlaying && retryCount < MAX_RETRIES) {
+      console.log(`[PLAYBACK] Retrying in ${RETRY_DELAY}ms... (video might still be committing)`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      return checkAndStartPlayback(namespace, retryCount + 1);
     }
     
     console.log('[PLAYBACK] No action needed');
     return false;
   } catch (error) {
     console.error('[PLAYBACK CHECK ERROR]:', error);
+    
+    if (retryCount < MAX_RETRIES) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      return checkAndStartPlayback(namespace, retryCount + 1);
+    }
+    
     return false;
   }
 }
 
-// export async function checkAndStartPlayback(namespace: any) {
-//   try {
-//     const current = await elsparkService.getCurrentVideo();
-//     const queue = await elsparkService.getQueue();
-    
-//     console.log('[PLAYBACK CHECK]', { 
-//       hasCurrentVideo: !!current, 
-//       queueLength: queue.length,
-//       currentVideoState: currentVideoState.video ? 'has video' : 'empty',
-//       currentVideoPlaying: currentVideoState.isPlaying
-//     });
-    
-//     // Check if nothing is playing but queue has videos
-//     const shouldStart = (
-//       (!current || !currentVideoState.video || !currentVideoState.isPlaying) && 
-//       queue.length > 0
-//     );
-    
-//     if (shouldStart) {
-//       console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
-//       await playNextVideo(namespace);
-//       return true;
-//     }
-    
-//     console.log('[PLAYBACK] No action needed - video already playing or queue empty');
-//     return false;
-//   } catch (error) {
-//     console.error('[PLAYBACK CHECK ERROR]:', error);
-//     return false;
-//   }
-// }
-
-// Utility function to emit to specific user
 export function emitToUser(profileId: number, event: string, data: any, io: Server) {
   const namespace = io.of('/elspark-tv');
   namespace.to(`user:${profileId}`).emit(event, data);
 }
 
-// Utility function to broadcast queue update
 export async function broadcastQueueUpdate(io: Server) {
   const namespace = io.of('/elspark-tv');
   const queue = await elsparkService.getQueue();
   namespace.to('live-tv-main').emit('video:queue_update', { queue });
 }
 
-// Utility function to emit coin update
 export function emitCoinUpdate(profileId: number, newBalance: number, io: Server) {
   emitToUser(profileId, 'user:coin_update', { balance: newBalance }, io);
 }
 
-// Utility function to emit collection update
 export function emitCollectionUpdate(profileId: number, io: Server) {
   emitToUser(profileId, 'collection:updated', { timestamp: Date.now() }, io);
 }

@@ -4,18 +4,16 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { ElsparkService } from '../services/elspark.service';
-import { emitCoinUpdate, broadcastQueueUpdate } from '../sockets/elspark.socket';
+import { emitCoinUpdate, broadcastQueueUpdate, checkAndStartPlayback } from '../sockets/elspark.socket';
 
 const router = express.Router();
 const elsparkService = new ElsparkService();
 
-// Use system temp directory for temporary file storage
 const tempDir = path.join(os.tmpdir(), 'elspark-temp');
 if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
 }
 
-// Multer configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, tempDir);
@@ -40,11 +38,10 @@ const upload = multer({
     }
   },
   limits: { 
-    fileSize: 500 * 1024 * 1024 // 500MB max
+    fileSize: 500 * 1024 * 1024
   }
 });
 
-// Middleware
 const validateProfileIdBody = (req: Request, res: Response, next: Function) => {
   const profileId = parseInt(req.body.profileId);
   
@@ -65,20 +62,11 @@ const validateProfileIdQuery = (req: Request, res: Response, next: Function) => 
     return;
   }
   
-
   res.locals.profileId = profileId;
   next();
 };
 
-// ========== COLLECTION ROUTES ==========
-
-/**
- * POST /api/elspark/collection/upload
- * Upload video to collection (1 elsCoin)
- * User becomes initial owner with 100% ownership
- */
 router.post('/collection/upload', upload.single('video'), async (req: Request, res: Response) => {
-  // Validate profileId after multer parses it
   const profileId = parseInt(req.body.profileId);
   
   if (!profileId || isNaN(profileId)) {
@@ -108,7 +96,6 @@ router.post('/collection/upload', upload.single('video'), async (req: Request, r
       description?.trim()
     );
 
-    // Emit socket events
     if (req.app.get('io')) {
       const io = req.app.get('io');
       emitCoinUpdate(profileId, result.newBalance, io);
@@ -135,14 +122,9 @@ router.post('/collection/upload', upload.single('video'), async (req: Request, r
   }
 });
 
-/**
- * GET /api/elspark/collection
- * Get user's owned videos
- */
 router.get('/collection', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
-    const profileId = res.locals.profileId; 
-
+    const profileId = res.locals.profileId;
     const collection = await elsparkService.getUserCollection(profileId);
 
     res.json({
@@ -157,12 +139,6 @@ router.get('/collection', validateProfileIdQuery, async (req: Request, res: Resp
   }
 });
 
-
-/**
- * POST /api/elspark/collection/purchase/:videoId
- * Purchase ownership share of video (2 elsCoins)
- * Revenue distributed among existing owners
- */
 router.post('/collection/purchase/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     const { videoId } = req.params;
@@ -170,12 +146,10 @@ router.post('/collection/purchase/:videoId', validateProfileIdBody, async (req: 
 
     const result = await elsparkService.purchaseVideo(profileId, videoId);
 
-    // Emit socket events to buyer and all owners who received revenue
     if (req.app.get('io')) {
       const io = req.app.get('io');
       emitCoinUpdate(profileId, result.buyerNewBalance, io);
       
-      // Notify all owners who received revenue
       for (const update of result.ownerUpdates) {
         emitCoinUpdate(update.profileId, update.newBalance, io);
       }
@@ -198,108 +172,73 @@ router.post('/collection/purchase/:videoId', validateProfileIdBody, async (req: 
   }
 });
 
-/**
- * POST /api/elspark/collection/post/:videoId
- * Post owned video to Live TV (FREE)
- */
-// Replace the POST /api/elspark/collection/post/:videoId route in elsparkRoutes.ts
-
+// CRITICAL FIX: Improved post route with guaranteed playback
 router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     const { videoId } = req.params;
     const { profileId } = req.body;
 
-    console.log('[ROUTE] POST request received - videoId:', videoId, 'profileId:', profileId);
+    console.log('[POST ROUTE] Starting - videoId:', videoId, 'profileId:', profileId);
 
+    // Step 1: Add to queue (in service)
     const result = await elsparkService.postToLiveTV(profileId, videoId);
 
-    console.log('[ROUTE] Service returned result:', {
+    console.log('[POST ROUTE] Video added to queue:', {
       queueItemId: result.queueItem.id,
+      position: result.queueItem.position,
+      status: result.queueItem.status,
       shouldStartPlayback: result.shouldStartPlayback
     });
 
+    // Step 2: Broadcast queue update immediately
     if (req.app.get('io')) {
       const io = req.app.get('io');
       const namespace = io.of('/elspark-tv');
-      const { playNextVideo, broadcastQueueUpdate } = require('../sockets/elspark.socket');
       
-      console.log('[ROUTE] Broadcasting queue update...');
       await broadcastQueueUpdate(io);
-      
-      if (result.shouldStartPlayback) {
-        console.log('[ROUTE] Should start playback - calling playNextVideo NOW (before response)');
+      console.log('[POST ROUTE] Queue update broadcasted');
+
+      // Step 3: Start playback with retry logic (non-blocking)
+      // Using setImmediate to ensure it runs after response
+      setImmediate(async () => {
+        console.log('[POST ROUTE] Triggering playback check...');
         
-        // CRITICAL FIX: Call playNextVideo BEFORE sending response
-        // This ensures video starts before client receives confirmation
-        await playNextVideo(namespace);
-        
-        console.log('[ROUTE] playNextVideo completed, now sending response');
-      } else {
-        console.log('[ROUTE] Video already playing, just added to queue');
-      }
+        // Multiple attempts to ensure playback starts
+        for (let i = 0; i < 3; i++) {
+          const started = await checkAndStartPlayback(namespace);
+          
+          if (started) {
+            console.log(`[POST ROUTE] Playback started successfully on attempt ${i + 1}`);
+            break;
+          }
+          
+          if (i < 2) {
+            console.log(`[POST ROUTE] Attempt ${i + 1} failed, retrying in 500ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+      });
     }
 
-    // Response sent AFTER playback has started
+    // Step 4: Send immediate response
     res.status(201).json({
       success: true,
-      message: 'Video posted to Live TV',
-      data: result
+      message: 'Video posted to Live TV successfully',
+      data: {
+        queueItem: result.queueItem,
+        position: result.queueItem.position
+      }
     });
+    
+    console.log('[POST ROUTE] Response sent to client');
   } catch (error: any) {
-    console.error('[ROUTE ERROR]:', error);
+    console.error('[POST ROUTE ERROR]:', error);
     res.status(400).json({ 
       error: error.message || 'Failed to post video to Live TV' 
     });
   }
 });
 
-//  router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
-//   try {
-//     const { videoId } = req.params;
-//     const { profileId } = req.body;
-
-//     const result = await elsparkService.postToLiveTV(profileId, videoId);
-
-//     if (req.app.get('io')) {
-//       const io = req.app.get('io');
-//       const namespace = io.of('/elspark-tv');
-//       const { checkAndStartPlayback, broadcastQueueUpdate } = require('../sockets/elspark.socket');
-      
-//       console.log('[POST] Video posted to queue, checking playback state...');
-      
-//       // First broadcast queue update
-//       await broadcastQueueUpdate(io);
-      
-//       // Immediately try to start playback (no delay)
-//       const started = await checkAndStartPlayback(namespace);
-//       console.log('[POST] Playback check result:', started);
-      
-//       // If it didn't start, try again after a short delay
-//       if (!started) {
-//         setTimeout(async () => {
-//           console.log('[POST] Retrying playback check...');
-//           await checkAndStartPlayback(namespace);
-//         }, 1000);
-//       }
-//     }
-
-//     res.status(201).json({
-//       success: true,
-//       message: 'Video posted to Live TV',
-//       data: result
-//     });
-//   } catch (error: any) {
-//     console.error('[POST ERROR]:', error);
-//     res.status(400).json({ 
-//       error: error.message || 'Failed to post video to Live TV' 
-//     });
-//   }
-// });
-
-/**
- * DELETE /api/elspark/collection/:videoId
- * Remove ownership from video or delete if sole owner
- */
 router.delete('/collection/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     const { videoId } = req.params;
@@ -319,16 +258,9 @@ router.delete('/collection/:videoId', validateProfileIdBody, async (req: Request
   }
 });
 
-// ========== VIDEO ROUTES ==========
-
-/**
- * GET /api/elspark/videos/:id
- * Get video details with ownership info
- */
 router.get('/videos/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
     const video = await elsparkService.getVideoDetails(id);
 
     if (!video) {
@@ -348,10 +280,6 @@ router.get('/videos/:id', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * DELETE /api/elspark/videos/:id
- * Delete video (only if sole owner)
- */
 router.delete('/videos/:id', validateProfileIdBody, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -376,12 +304,6 @@ router.delete('/videos/:id', validateProfileIdBody, async (req: Request, res: Re
   }
 });
 
-// ========== LIVE TV ROUTES ==========
-
-/**
- * GET /api/elspark/live-tv/queue
- * Get current queue
- */
 router.get('/live-tv/queue', async (req: Request, res: Response) => {
   try {
     const queue = await elsparkService.getQueue();
@@ -398,10 +320,6 @@ router.get('/live-tv/queue', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/elspark/live-tv/current
- * Get currently playing video
- */
 router.get('/live-tv/current', async (req: Request, res: Response) => {
   try {
     const current = await elsparkService.getCurrentVideo();
@@ -418,10 +336,6 @@ router.get('/live-tv/current', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/elspark/live-tv/history
- * Get video history
- */
 router.get('/live-tv/history', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 20;
@@ -439,16 +353,9 @@ router.get('/live-tv/history', async (req: Request, res: Response) => {
   }
 });
 
-// ========== ELSCOIN ROUTES ==========
-
-/**
- * GET /api/elspark/coins/balance
- * Get user's elsCoin balance
- */
 router.get('/coins/balance', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
-    const profileId = res.locals.profileId; // Changed from req.body.profileId
-
+    const profileId = res.locals.profileId;
     const balance = await elsparkService.getCoinBalance(profileId);
 
     res.json({
@@ -463,14 +370,9 @@ router.get('/coins/balance', validateProfileIdQuery, async (req: Request, res: R
   }
 });
 
-/**
- * GET /api/elspark/coins/transactions
- * Get user's transaction history
- */
 router.get('/coins/transactions', validateProfileIdQuery, async (req: Request, res: Response) => {
   try {
-    const profileId = res.locals.profileId; // Changed from req.body.profileId
-
+    const profileId = res.locals.profileId;
     const transactions = await elsparkService.getTransactionHistory(profileId);
 
     res.json({
