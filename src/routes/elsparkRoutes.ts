@@ -233,14 +233,21 @@ router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Requ
     }
 
     // Step 4: Send immediate response
-    res.status(201).json({
-      success: true,
-      message: 'Video posted to Live TV successfully',
-      data: {
-        queueItem: result.queueItem,
-        position: result.queueItem.position
-      }
-    });
+    // Emit coin update
+if (req.app.get('io')) {
+  const io = req.app.get('io');
+  emitCoinUpdate(profileId, result.newBalance, io);
+}
+
+res.status(201).json({
+  success: true,
+  message: 'Video posted to Live TV successfully (1 coin deducted)',
+  data: {
+    queueItem: result.queueItem,
+    position: result.queueItem.position,
+    newBalance: result.newBalance
+  }
+});
     
     console.log('[POST ROUTE] Response sent to client');
   } catch (error: any) {

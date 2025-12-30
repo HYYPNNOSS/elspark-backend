@@ -63,14 +63,14 @@ export class ElsparkService {
         }
   
         const balance = profile.account.cyberCoins.toNumber();
-        if (balance < 1) {
-          throw new Error('Insufficient cyberCoins. You need 1 cyberCoin to upload.');
-        }
+        // if (balance < 1) {
+        //   throw new Error('Insufficient cyberCoins. You need 1 cyberCoin to upload.');
+        // }
   
-        await tx.account.update({
-          where: { id: profile.accountId },
-          data: { cyberCoins: { decrement: 1 } }
-        });
+        // await tx.account.update({
+        //   where: { id: profile.accountId },
+        //   data: { cyberCoins: { decrement: 1 } }
+        // });
   
         const video = await tx.elsparkVideo.create({
           data: {
@@ -98,7 +98,7 @@ export class ElsparkService {
   
         return {
           video,
-          newBalance: balance - 1
+          newBalance: balance 
         };
       }, {
         timeout: 10000 // Reduced to 10 seconds - should be plenty for DB ops only
@@ -271,6 +271,7 @@ export class ElsparkService {
    */
   async postToLiveTV(profileId: number, videoId: string) {
     const result = await prisma.$transaction(async (tx) => {
+      // Check ownership
       const ownership = await tx.videoOwnership.findUnique({
         where: {
           profileId_videoId: {
@@ -278,13 +279,31 @@ export class ElsparkService {
             videoId
           }
         },
-        include: { video: true }
+        include: { 
+          video: true,
+          profile: {
+            include: { account: true }
+          }
+        }
       });
   
       if (!ownership) {
         throw new Error('You must own this video to post it to Live TV');
       }
   
+      // Check balance for posting cost (1 coin)
+      const balance = ownership.profile.account.cyberCoins.toNumber();
+      if (balance < 1) {
+        throw new Error('Insufficient cyberCoins. You need 1 cyberCoin to post to Live TV.');
+      }
+  
+      // Deduct 1 coin for posting
+      await tx.account.update({
+        where: { id: ownership.profile.accountId },
+        data: { cyberCoins: { decrement: 1 } }
+      });
+  
+      // Check if video already in queue
       const existingQueue = await tx.liveTVQueue.findFirst({
         where: {
           videoId,
@@ -296,6 +315,7 @@ export class ElsparkService {
         throw new Error('Video is already in the queue');
       }
   
+      // Add to queue
       const lastQueueItem = await tx.liveTVQueue.findFirst({
         orderBy: { position: 'desc' }
       });
@@ -315,7 +335,6 @@ export class ElsparkService {
         data: { status: 'queued' }
       });
   
-      // CHECK IF NOTHING IS PLAYING - WITHIN SAME TRANSACTION
       const currentlyPlaying = await tx.liveTVQueue.findFirst({
         where: { status: 'playing' }
       });
@@ -323,12 +342,74 @@ export class ElsparkService {
       return { 
         queueItem, 
         video: ownership.video,
-        shouldStartPlayback: !currentlyPlaying // Flag to start playback
+        shouldStartPlayback: !currentlyPlaying,
+        newBalance: balance - 1
       };
     });
   
     return result;
   }
+
+  // async postToLiveTV(profileId: number, videoId: string) {
+  //   const result = await prisma.$transaction(async (tx) => {
+  //     const ownership = await tx.videoOwnership.findUnique({
+  //       where: {
+  //         profileId_videoId: {
+  //           profileId,
+  //           videoId
+  //         }
+  //       },
+  //       include: { video: true }
+  //     });
+  
+  //     if (!ownership) {
+  //       throw new Error('You must own this video to post it to Live TV');
+  //     }
+  
+  //     const existingQueue = await tx.liveTVQueue.findFirst({
+  //       where: {
+  //         videoId,
+  //         status: { in: ['waiting', 'playing'] }
+  //       }
+  //     });
+  
+  //     if (existingQueue) {
+  //       throw new Error('Video is already in the queue');
+  //     }
+  
+  //     const lastQueueItem = await tx.liveTVQueue.findFirst({
+  //       orderBy: { position: 'desc' }
+  //     });
+  //     const nextPosition = lastQueueItem ? lastQueueItem.position + 1 : 1;
+  
+  //     const queueItem = await tx.liveTVQueue.create({
+  //       data: {
+  //         videoId,
+  //         position: nextPosition,
+  //         status: 'waiting',
+  //         uploaderId: profileId
+  //       }
+  //     });
+  
+  //     await tx.elsparkVideo.update({
+  //       where: { id: videoId },
+  //       data: { status: 'queued' }
+  //     });
+  
+      
+  //     const currentlyPlaying = await tx.liveTVQueue.findFirst({
+  //       where: { status: 'playing' }
+  //     });
+  
+  //     return { 
+  //       queueItem, 
+  //       video: ownership.video,
+  //       shouldStartPlayback: !currentlyPlaying
+  //     };
+  //   });
+  
+  //   return result;
+  // }
 
   // nooo
 
