@@ -77,6 +77,7 @@ model ElsparkVideo {
   filename    String
   duration    Float            @default(0)
   fileSize    Int
+  lastPlayedInFiller DateTime?
   uploaderId  Int
   source      String           @default("collection") // 'collection'
   status      String           @default("in_collection") // 'in_collection', 'queued', 'playing', 'played'
@@ -114,6 +115,7 @@ model LiveTVQueue {
   startTime  DateTime?
   endTime    DateTime?
   createdAt  DateTime     @default(now())
+  lastPlayedAt DateTime?
   video      ElsparkVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
   uploader   Profile      @relation("QueueUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
 

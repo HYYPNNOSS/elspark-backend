@@ -749,6 +749,44 @@ async getCurrentVideo() {
   }
 
   /**
+ * Get random videos from collections for filler content
+ * Prioritizes videos that haven't been played recently
+ */
+async getFillerVideos(limit: number = 10) {
+  const videos = await prisma.elsparkVideo.findMany({
+    where: {
+      status: 'in_collection',
+    },
+    include: {
+      uploader: {
+        select: {
+          id: true,
+          username: true,
+          profilePicture: true
+        }
+      }
+    },
+    orderBy: [
+      { lastPlayedInFiller: 'asc' }, // Prioritize least recently played
+      { createdAt: 'desc' }
+    ],
+    take: limit
+  });
+
+  return videos;
+}
+
+/**
+ * Mark video as played in filler rotation
+ */
+async markFillerVideoPlayed(videoId: string) {
+  await prisma.elsparkVideo.update({
+    where: { id: videoId },
+    data: { lastPlayedInFiller: new Date() }
+  });
+}
+
+  /**
    * Delete file from Wasabi S3
    */
   private async deleteFromWasabi(url: string): Promise<void> {

@@ -5,6 +5,9 @@ import { ElsparkService } from "../services/elspark.service";
 const prisma = new PrismaClient();
 const elsparkService = new ElsparkService();
 
+let isFillerMode = false;
+let fillerVideoQueue: any[] = [];
+
 interface VideoQueueItem {
   id: string;
   videoId: string;
@@ -216,10 +219,9 @@ export function setupElsparkWebSocket(io: Server) {
   loadInitialVideo(elsparkNamespace);
 }
 
-// CRITICAL FIX: Added retry logic with exponential backoff
 export async function playNextVideo(namespace: any, retryCount = 0): Promise<boolean> {
   const MAX_RETRIES = 3;
-  const RETRY_DELAY = 200; // Start with 200ms
+  const RETRY_DELAY = 200;
   
   try {
     console.log(`[PLAY NEXT] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
@@ -227,19 +229,24 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
     // Mark current video as played
     if (currentVideoState.video) {
       console.log('[PLAY NEXT] Marking current video as played:', currentVideoState.video.video.title);
-      await prisma.liveTVQueue.update({
-        where: { id: currentVideoState.video.id },
-        data: { 
-          status: 'played',
-          endTime: new Date()
-        }
-      });
       
-      // Wait for DB to commit
+      // If it was a filler video, mark it
+      if (isFillerMode) {
+        await elsparkService.markFillerVideoPlayed(currentVideoState.video.videoId);
+      } else {
+        await prisma.liveTVQueue.update({
+          where: { id: currentVideoState.video.id },
+          data: { 
+            status: 'played',
+            endTime: new Date()
+          }
+        });
+      }
+      
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Get next video with fresh query
+    // Check for user-posted videos first (priority)
     const nextVideo = await prisma.liveTVQueue.findFirst({
       where: { status: 'waiting' },
       orderBy: { position: 'asc' },
@@ -258,10 +265,11 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
       }
     });
 
-    console.log('[PLAY NEXT] Found next video:', nextVideo ? nextVideo.video.title : 'none');
-
+    // USER VIDEO FOUND - Exit filler mode and play it
     if (nextVideo) {
-      // Update queue item status
+      isFillerMode = false;
+      fillerVideoQueue = [];
+      
       await prisma.liveTVQueue.update({
         where: { id: nextVideo.id },
         data: { 
@@ -270,7 +278,6 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
         }
       });
 
-      // Update current state
       currentVideoState = {
         video: {
           id: nextVideo.id,
@@ -291,47 +298,83 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
         startedAt: Date.now()
       };
 
-      console.log('[PLAY NEXT] Broadcasting video:started event for:', nextVideo.video.title);
+      console.log('[PLAY NEXT] Playing user video:', nextVideo.video.title);
 
-      // Broadcast video started
       namespace.to('live-tv-main').emit('video:started', {
         video: currentVideoState.video,
+        isFiller: false,
         timestamp: new Date().toISOString()
       });
 
-      // Broadcast queue update
       const updatedQueue = await elsparkService.getQueue();
-      namespace.to('live-tv-main').emit('video:queue_update', {
-        queue: updatedQueue
-      });
+      namespace.to('live-tv-main').emit('video:queue_update', { queue: updatedQueue });
       
-      console.log('[PLAY NEXT] Successfully started video:', nextVideo.video.title);
       return true;
-    } else if (retryCount < MAX_RETRIES) {
-      // Retry with exponential backoff
-      const delay = RETRY_DELAY * Math.pow(2, retryCount);
-      console.log(`[PLAY NEXT] No video found, retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return playNextVideo(namespace, retryCount + 1);
-    } else {
-      // No videos in queue after retries
-      console.log('[PLAY NEXT] No videos in queue after retries, emitting queue_empty');
-      currentVideoState = {
-        video: null,
-        currentTime: 0,
-        isPlaying: false,
-        startedAt: 0
-      };
-
-      namespace.to('live-tv-main').emit('video:queue_empty');
-      return false;
     }
+
+    // NO USER VIDEOS - Enter/Continue filler mode
+    console.log('[PLAY NEXT] No user videos, entering filler mode');
+    
+    // Refresh filler queue if empty
+    if (fillerVideoQueue.length === 0) {
+      const fillerVideos = await elsparkService.getFillerVideos(20);
+      
+      if (fillerVideos.length === 0) {
+        console.log('[PLAY NEXT] No filler videos available');
+        currentVideoState = {
+          video: null,
+          currentTime: 0,
+          isPlaying: false,
+          startedAt: 0
+        };
+        isFillerMode = false;
+        namespace.to('live-tv-main').emit('video:queue_empty');
+        return false;
+      }
+      
+      fillerVideoQueue = fillerVideos;
+      console.log(`[PLAY NEXT] Loaded ${fillerVideos.length} filler videos`);
+    }
+
+    // Play next filler video
+    const nextFiller = fillerVideoQueue.shift()!;
+    isFillerMode = true;
+
+    currentVideoState = {
+      video: {
+        id: `filler-${nextFiller.id}`,
+        videoId: nextFiller.id,
+        position: 0,
+        status: 'playing',
+        video: {
+          id: nextFiller.id,
+          title: nextFiller.title,
+          url: nextFiller.url,
+          duration: nextFiller.duration,
+          uploaderId: nextFiller.uploaderId,
+          uploader: nextFiller.uploader
+        }
+      },
+      currentTime: 0,
+      isPlaying: true,
+      startedAt: Date.now()
+    };
+
+    console.log('[PLAY NEXT] Playing filler video:', nextFiller.title);
+
+    namespace.to('live-tv-main').emit('video:started', {
+      video: currentVideoState.video,
+      isFiller: true,
+      timestamp: new Date().toISOString()
+    });
+
+    return true;
+
   } catch (error) {
     console.error('[PLAY NEXT ERROR]:', error);
     
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_DELAY * Math.pow(2, retryCount);
-      console.log(`[PLAY NEXT] Error occurred, retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return playNextVideo(namespace, retryCount + 1);
     }
@@ -421,67 +464,35 @@ export async function checkAndStartPlayback(namespace: any, retryCount = 0): Pro
   try {
     console.log(`[PLAYBACK CHECK] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
     
-    // Force fresh query with timeout
     const [current, queue] = await Promise.all([
       prisma.liveTVQueue.findFirst({
         where: { status: 'playing' },
-        include: {
-          video: {
-            include: {
-              uploader: {
-                select: {
-                  id: true,
-                  username: true,
-                  profilePicture: true
-                }
-              }
-            }
-          }
-        }
       }),
       prisma.liveTVQueue.findMany({
         where: { status: 'waiting' },
         orderBy: { position: 'asc' },
-        take: 5, // Only check first 5
-        include: {
-          video: {
-            include: {
-              uploader: {
-                select: {
-                  id: true,
-                  username: true,
-                  profilePicture: true
-                }
-              }
-            }
-          }
-        }
+        take: 5,
       })
     ]);
     
     console.log('[PLAYBACK CHECK]', { 
       hasCurrentVideo: !!current, 
       queueLength: queue.length,
-      currentVideoState: currentVideoState.video ? 'has video' : 'empty',
+      isFillerMode,
       currentVideoPlaying: currentVideoState.isPlaying,
-      queueFirstItem: queue[0]?.video?.title || 'none',
-      attempt: retryCount + 1
     });
     
-    // Check if nothing is playing AND queue has videos
-    if (!current && queue.length > 0 && !currentVideoState.isPlaying) {
-      console.log('[PLAYBACK] Starting playback - queue has videos but nothing playing');
+    // Start playback if nothing is playing (user videos OR filler)
+    if (!current && !currentVideoState.isPlaying) {
+      console.log('[PLAYBACK] Starting playback');
       return await playNextVideo(namespace);
     }
     
-    // Retry if we expect a video but don't see it yet
-    if (!current && !currentVideoState.isPlaying && retryCount < MAX_RETRIES) {
-      console.log(`[PLAYBACK] Retrying in ${RETRY_DELAY}ms... (video might still be committing)`);
+    if (retryCount < MAX_RETRIES) {
       await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
       return checkAndStartPlayback(namespace, retryCount + 1);
     }
     
-    console.log('[PLAYBACK] No action needed');
     return false;
   } catch (error) {
     console.error('[PLAYBACK CHECK ERROR]:', error);
