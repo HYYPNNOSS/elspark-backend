@@ -184,6 +184,9 @@ router.post('/collection/purchase/:videoId', validateProfileIdBody, async (req: 
   }
 });
 
+
+
+
 // CRITICAL FIX: Improved post route with guaranteed playback
 router.post('/collection/post/:videoId', validateProfileIdBody, async (req: Request, res: Response) => {
   try {

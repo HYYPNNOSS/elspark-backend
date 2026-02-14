@@ -7,6 +7,7 @@ const elsparkService = new ElsparkService();
 
 let isFillerMode = false;
 let fillerVideoQueue: any[] = [];
+let playedFillerVideoIds: string[] = []; 
 
 interface VideoQueueItem {
   id: string;
@@ -84,6 +85,17 @@ export function setupElsparkWebSocket(io: Server) {
         const queue = await elsparkService.getQueue();
         const currentVideo = await elsparkService.getCurrentVideo();
         
+        // Get filler videos if queue is empty
+        let fillerInfo = null;
+        if (queue.length === 0 && isFillerMode) {
+          const fillerVideos = await elsparkService.getFillerVideos(10, playedFillerVideoIds);
+          fillerInfo = {
+            fillerQueue: fillerVideos,
+            isFillerMode: true,
+            currentFillerQueue: fillerVideoQueue
+          };
+        }
+        
         socket.emit('initial:state', {
           currentVideo: currentVideoState,
           queue,
@@ -93,7 +105,8 @@ export function setupElsparkWebSocket(io: Server) {
             id: profile.id,
             username: profile.username,
             profilePicture: profile.profilePicture
-          }
+          },
+          ...(fillerInfo && fillerInfo)
         });
 
         // Check if we need to start playback (for late joiners)
@@ -230,10 +243,16 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
     if (currentVideoState.video) {
       console.log('[PLAY NEXT] Marking current video as played:', currentVideoState.video.video.title);
       
-      // If it was a filler video, mark it
+      // If it was a filler video, add to played list
       if (isFillerMode) {
+        playedFillerVideoIds.push(currentVideoState.video.videoId);
         await elsparkService.markFillerVideoPlayed(currentVideoState.video.videoId);
+        console.log(`[PLAY NEXT] 📝 Marked filler video as played. Total played in cycle: ${playedFillerVideoIds.length}`);
+        
+        // IMPORTANT: Keep video status as 'collection' so it can be used again
+        // (Don't change status for filler videos, they stay in collection)
       } else {
+        // For user-posted videos, mark as played in queue
         await prisma.liveTVQueue.update({
           where: { id: currentVideoState.video.id },
           data: { 
@@ -241,6 +260,13 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
             endTime: new Date()
           }
         });
+        
+        // Reset video status back to 'collection' after it finishes playing from queue
+        await prisma.elsparkVideo.update({
+          where: { id: currentVideoState.video.videoId },
+          data: { status: 'collection' } // Changed from 'in_collection'
+        });
+        console.log('[PLAY NEXT] 🔄 Reset video status to "collection"');
       }
       
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -267,8 +293,10 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
 
     // USER VIDEO FOUND - Exit filler mode and play it
     if (nextVideo) {
+      console.log('[PLAY NEXT] 🎯 USER VIDEO FOUND - Exiting filler mode');
       isFillerMode = false;
       fillerVideoQueue = [];
+      playedFillerVideoIds = []; // Reset played tracking
       
       await prisma.liveTVQueue.update({
         where: { id: nextVideo.id },
@@ -298,7 +326,7 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
         startedAt: Date.now()
       };
 
-      console.log('[PLAY NEXT] Playing user video:', nextVideo.video.title);
+      console.log('[PLAY NEXT] ▶️  Playing user video:', nextVideo.video.title);
 
       namespace.to('live-tv-main').emit('video:started', {
         video: currentVideoState.video,
@@ -313,14 +341,21 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
     }
 
     // NO USER VIDEOS - Enter/Continue filler mode
-    console.log('[PLAY NEXT] No user videos, entering filler mode');
-    
-    // Refresh filler queue if empty
+    console.log('[PLAY NEXT] 📺 No user videos - entering/continuing filler mode');
+    isFillerMode = true;
+
+    // Load filler queue if empty OR if we need more videos
     if (fillerVideoQueue.length === 0) {
-      const fillerVideos = await elsparkService.getFillerVideos(20);
+      console.log('[PLAY NEXT] 🔄 Filler queue empty - loading videos...');
+      
+      // Get videos, excluding ones we've already played this cycle
+      const excludeIds = [...playedFillerVideoIds];
+      console.log(`[PLAY NEXT] 🚫 Excluding ${excludeIds.length} already-played videos from this cycle`);
+      
+      let fillerVideos = await elsparkService.getFillerVideos(30, excludeIds);
       
       if (fillerVideos.length === 0) {
-        console.log('[PLAY NEXT] No filler videos available');
+        console.log('[PLAY NEXT] ❌ No videos available in collections!');
         currentVideoState = {
           video: null,
           currentTime: 0,
@@ -328,17 +363,58 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
           startedAt: 0
         };
         isFillerMode = false;
+        playedFillerVideoIds = [];
         namespace.to('live-tv-main').emit('video:queue_empty');
         return false;
       }
       
       fillerVideoQueue = fillerVideos;
-      console.log(`[PLAY NEXT] Loaded ${fillerVideos.length} filler videos`);
+      console.log(`[PLAY NEXT] ✅ Loaded ${fillerVideoQueue.length} videos into filler queue`);
+      console.log(`[PLAY NEXT] 🎬 Next up: ${fillerVideoQueue.slice(0, 3).map(v => v.title).join(', ')}...`);
     }
 
-    // Play next filler video
+    // Pre-load more videos when queue gets low (keep it filled)
+    if (fillerVideoQueue.length <= 5) {
+      console.log('[PLAY NEXT] ⚠️  Queue running low, pre-loading more videos...');
+      
+      // Get videos already in queue + already played this cycle
+      const alreadyHandledIds = [
+        ...fillerVideoQueue.map(v => v.id),
+        ...playedFillerVideoIds
+      ];
+      
+      console.log(`[PLAY NEXT] 🚫 Excluding ${alreadyHandledIds.length} videos (${fillerVideoQueue.length} queued + ${playedFillerVideoIds.length} played)`);
+      
+      const moreVideos = await elsparkService.getFillerVideos(20, alreadyHandledIds);
+      
+      if (moreVideos.length > 0) {
+        fillerVideoQueue.push(...moreVideos);
+        console.log(`[PLAY NEXT] ➕ Added ${moreVideos.length} more videos (queue now: ${fillerVideoQueue.length})`);
+      } else {
+        console.log('[PLAY NEXT] 🔄 All videos played - will reset cycle after current queue empties');
+        // Don't reset yet - let current queue finish, then getFillerVideos will reset automatically
+      }
+    }
+
+    // If still no videos after all attempts
+    if (fillerVideoQueue.length === 0) {
+      console.log('[PLAY NEXT] ❌ CRITICAL: Queue still empty after loading attempts');
+      currentVideoState = {
+        video: null,
+        currentTime: 0,
+        isPlaying: false,
+        startedAt: 0
+      };
+      isFillerMode = false;
+      playedFillerVideoIds = [];
+      namespace.to('live-tv-main').emit('video:queue_empty');
+      return false;
+    }
+
+    // Play next filler video from queue
     const nextFiller = fillerVideoQueue.shift()!;
-    isFillerMode = true;
+    console.log(`[PLAY NEXT] ▶️  Playing: "${nextFiller.title}"`);
+    console.log(`[PLAY NEXT] 📊 Queue remaining: ${fillerVideoQueue.length} | Played this cycle: ${playedFillerVideoIds.length + 1}`);
 
     currentVideoState = {
       video: {
@@ -360,12 +436,23 @@ export async function playNextVideo(namespace: any, retryCount = 0): Promise<boo
       startedAt: Date.now()
     };
 
-    console.log('[PLAY NEXT] Playing filler video:', nextFiller.title);
+    console.log('[PLAY NEXT] 🎬 Video info:', {
+      title: nextFiller.title,
+      duration: nextFiller.duration,
+      queueRemaining: fillerVideoQueue.length
+    });
 
     namespace.to('live-tv-main').emit('video:started', {
       video: currentVideoState.video,
       isFiller: true,
       timestamp: new Date().toISOString()
+    });
+    
+    // Emit current filler queue state
+    namespace.to('live-tv-main').emit('video:filler_queue', {
+      fillerQueue: fillerVideoQueue.slice(0, 10), // Send next 10 videos
+      isFillerMode: true,
+      playedCount: playedFillerVideoIds.length
     });
 
     return true;
@@ -449,7 +536,9 @@ function startVideoSyncBroadcast(namespace: any) {
         serverTime: Date.now()
       });
 
-      if (currentVideoState.currentTime >= currentVideoState.video.video.duration) {
+      // Add 1 second buffer to ensure video actually ends
+      if (currentVideoState.currentTime >= (currentVideoState.video.video.duration - 1)) {
+        console.log('[SYNC] Video duration reached, playing next...');
         playNextVideo(namespace);
       }
     }
@@ -515,6 +604,15 @@ export async function broadcastQueueUpdate(io: Server) {
   const namespace = io.of('/elspark-tv');
   const queue = await elsparkService.getQueue();
   namespace.to('live-tv-main').emit('video:queue_update', { queue });
+  
+  // If queue is empty, also send filler queue info
+  if (queue.length === 0) {
+    const fillerVideos = await elsparkService.getFillerVideos(10, []);
+    namespace.to('live-tv-main').emit('video:filler_queue', { 
+      fillerQueue: fillerVideos,
+      isFillerMode: true 
+    });
+  }
 }
 
 export function emitCoinUpdate(profileId: number, newBalance: number, io: Server) {

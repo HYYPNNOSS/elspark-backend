@@ -81,6 +81,7 @@ model ElsparkVideo {
   uploaderId  Int
   source      String           @default("collection") // 'collection'
   status      String           @default("in_collection") // 'in_collection', 'queued', 'playing', 'played'
+  sourceUrl   String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   uploader    Profile          @relation("VideoUploader", fields: [uploaderId], references: [id], onDelete: Cascade)

@@ -82,7 +82,7 @@ export class ElsparkService {
             fileSize: videoFile.size,
             uploaderId: profileId,
             source: 'collection',
-            status: 'in_collection'
+            status: 'collection' // Changed from 'in_collection'
           }
         });
   
@@ -110,6 +110,93 @@ export class ElsparkService {
       throw error;
     }
   }
+
+  /**
+ * Add video from URL (no upload cost, just fetches metadata)
+ */
+async addVideoFromUrl(
+  profileId: number,
+  videoUrl: string,
+  title: string,
+  description?: string
+) {
+  console.log('[ADD URL] Starting URL video addition...');
+
+  // Basic URL validation
+  if (!videoUrl.match(/^https?:\/\/.+/)) {
+    throw new Error('Invalid URL format');
+  }
+
+  // For now, we'll store the URL directly
+  // In production, you might want to:
+  // 1. Download and re-upload to Wasabi for reliability
+  // 2. Use a video metadata API to get duration
+  // 3. Validate the URL is actually a video
+
+  return await prisma.$transaction(async (tx) => {
+    const profile = await tx.profile.findUnique({
+      where: { id: profileId },
+      include: { account: true }
+    });
+
+    if (!profile) {
+      throw new Error('Profile not found');
+    }
+
+    // Create video record with URL source
+    const video = await tx.elsparkVideo.create({
+      data: {
+        title,
+        description,
+        url: videoUrl,
+        sourceUrl: videoUrl,
+        filename: new URL(videoUrl).pathname.split('/').pop() || 'url-video',
+        duration: await this.getVideoDurationFromUrl(videoUrl),
+        fileSize: 0,
+        uploaderId: profileId,
+        source: 'url',
+        status: 'collection' // Changed from 'in_collection'
+      }
+    });
+
+    // Create ownership
+    await tx.videoOwnership.create({
+      data: {
+        videoId: video.id,
+        profileId,
+        ownershipShare: 100.0,
+        acquisitionType: 'upload',
+        acquisitionPrice: 0 // Free for URL imports
+      }
+    });
+
+    return {
+      video,
+      newBalance: profile.account.cyberCoins.toNumber()
+    };
+  });
+}
+
+
+
+/**
+ * Fetch video duration from URL using ffprobe
+ * (Only works if server can access the URL)
+ */
+private async getVideoDurationFromUrl(url: string): Promise<number> {
+  try {
+    const ffprobe = require('ffprobe');
+    const ffprobeStatic = require('ffprobe-static');
+    
+    const info = await ffprobe(url, { path: ffprobeStatic.path });
+    const duration = info.streams[0].duration;
+    return duration ? parseFloat(duration) : 0;
+  } catch (error) {
+    console.error('Error getting video duration from URL:', error);
+    return 0; // Default to 0 if can't fetch
+  }
+}
+
 
   /**
    * Purchase video for collection (costs 2 cyberCoins)
@@ -332,7 +419,7 @@ export class ElsparkService {
   
       await tx.elsparkVideo.update({
         where: { id: videoId },
-        data: { status: 'queued' }
+        data: { status: 'queued' }  // Temporarily set to queued while in queue
       });
   
       const currentlyPlaying = await tx.liveTVQueue.findFirst({
@@ -751,11 +838,18 @@ async getCurrentVideo() {
   /**
  * Get random videos from collections for filler content
  * Prioritizes videos that haven't been played recently
+ * IMPROVED: Better handling of empty results and video cycling
  */
-async getFillerVideos(limit: number = 10) {
-  const videos = await prisma.elsparkVideo.findMany({
+async getFillerVideos(limit: number = 10, excludeIds: string[] = []) {
+  console.log(`[GET FILLER] Fetching up to ${limit} videos, excluding ${excludeIds.length} IDs`);
+  
+  // Get ALL videos from database first
+  const allVideos = await prisma.elsparkVideo.findMany({
     where: {
-      status: 'in_collection',
+      status: 'collection', // Changed from 'in_collection' to match actual DB value
+      id: {
+        notIn: excludeIds.length > 0 ? excludeIds : undefined
+      }
     },
     include: {
       uploader: {
@@ -765,15 +859,62 @@ async getFillerVideos(limit: number = 10) {
           profilePicture: true
         }
       }
-    },
-    orderBy: [
-      { lastPlayedInFiller: 'asc' }, // Prioritize least recently played
-      { createdAt: 'desc' }
-    ],
-    take: limit
+    }
   });
 
-  return videos;
+  console.log(`[GET FILLER] Found ${allVideos.length} videos (excluding ${excludeIds.length} already queued)`);
+  
+  if (allVideos.length === 0) {
+    console.log('[GET FILLER] ⚠️  No videos found with exclusions, resetting cycle...');
+    // If no videos with exclusions, get ALL videos (reset the cycle)
+    const resetVideos = await prisma.elsparkVideo.findMany({
+      where: {
+        status: 'queued' // Changed from 'in_collection' to match actual DB value
+      },
+      include: {
+        uploader: {
+          select: {
+            id: true,
+            username: true,
+            profilePicture: true
+          }
+        }
+      }
+    });
+    
+    console.log(`[GET FILLER] 🔄 Reset cycle - found ${resetVideos.length} total videos`);
+    
+    if (resetVideos.length === 0) {
+      console.log('[GET FILLER] ❌ NO VIDEOS IN DATABASE AT ALL');
+      return [];
+    }
+    
+    // Shuffle and return
+    const shuffled = [...resetVideos];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    
+    const result = shuffled.slice(0, Math.min(limit, shuffled.length));
+    console.log(`[GET FILLER] ✅ Returning ${result.length} shuffled videos (after reset)`);
+    console.log(`[GET FILLER] 🎬 Next videos: ${result.slice(0, 3).map(v => v.title).join(', ')}...`);
+    return result;
+  }
+
+  // Shuffle using Fisher-Yates algorithm for true randomness
+  const shuffled = [...allVideos];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  // Return up to 'limit' videos
+  const result = shuffled.slice(0, Math.min(limit, shuffled.length));
+  console.log(`[GET FILLER] ✅ Returning ${result.length} shuffled videos`);
+  console.log(`[GET FILLER] 🎬 Next videos: ${result.slice(0, 3).map(v => v.title).join(', ')}...`);
+  
+  return result;
 }
 
 /**
