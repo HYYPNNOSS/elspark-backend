@@ -846,7 +846,8 @@ async getFillerVideos(limit: number = 10, excludeIds: string[] = []) {
   // Get ALL videos from database first
   const allVideos = await prisma.elsparkVideo.findMany({
     where: {
-      status: 'collection', // Changed from 'in_collection' to match actual DB value
+      status: 'collection',
+      uploaderId: 5,
       id: {
         notIn: excludeIds.length > 0 ? excludeIds : undefined
       }
@@ -869,7 +870,8 @@ async getFillerVideos(limit: number = 10, excludeIds: string[] = []) {
     // If no videos with exclusions, get ALL videos (reset the cycle)
     const resetVideos = await prisma.elsparkVideo.findMany({
       where: {
-        status: 'queued' // Changed from 'in_collection' to match actual DB value
+        status: 'queued',
+        uploaderId: 5
       },
       include: {
         uploader: {
