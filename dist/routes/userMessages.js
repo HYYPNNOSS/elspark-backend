@@ -35,14 +35,14 @@ router.get('/', async (req, res) => {
                     select: {
                         id: true,
                         username: true,
-                        email: true
+                        // email: true
                     }
                 },
                 receiver: {
                     select: {
                         id: true,
                         username: true,
-                        email: true
+                        // email: true
                     }
                 }
             }

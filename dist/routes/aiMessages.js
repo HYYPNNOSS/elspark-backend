@@ -5,38 +5,38 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
-const aiMiddleware_1 = require("../middlewares/aiMiddleware");
+const authMiddleware_1 = require("../middlewares/authMiddleware");
 const router = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
-// GET /api/ai-messages/:sessionId - Get messages for a session
-router.get('/:sessionId', aiMiddleware_1.aiMiddleware, async (req, res) => {
+router.get('/:sessionId', authMiddleware_1.verifyToken, async (req, res) => {
     try {
         const { sessionId } = req.params;
-        const userId = req.user.userId;
-        // Verify session belongs to user
+        const userId = req.user?.profileId || req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
         const session = await prisma.aISession.findFirst({
             where: {
                 id: sessionId,
-                userId
+                profileId: userId
             }
         });
         if (!session) {
             res.status(404).json({ error: 'Session not found' });
             return;
         }
-        // Get messages for this session
         const messages = await prisma.aIMsg.findMany({
             where: {
-                userId,
+                profileId: userId,
                 sessionId
             },
             orderBy: { createdAt: 'asc' }
         });
-        // Format messages for chat interface
         const formattedMessages = messages.map(msg => ({
             id: msg.id,
             content: msg.message,
-            senderId: msg.sender === 'user' ? userId : session.botId,
+            senderId: msg.sender === 'user' ? userId : `bot-${session.botId}`,
             receiverId: msg.sender === 'user' ? session.botId : userId,
             createdAt: msg.createdAt.toISOString()
         }));

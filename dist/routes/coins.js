@@ -7,7 +7,6 @@ const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
 const router = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
-// Mock middleware to simulate auth
 const mockAuth = (req, res, next) => {
     const userId = parseInt(req.headers['user-id']);
     if (!userId) {
@@ -18,19 +17,22 @@ const mockAuth = (req, res, next) => {
     next();
 };
 router.post('/buy', mockAuth, async (req, res) => {
+    console.log("amount");
     const { amount } = req.body;
-    const validAmounts = [10, 20, 30, 40];
+    const validAmounts = [5, 10, 15, 20];
+    console.log(amount);
     if (!validAmounts.includes(amount)) {
         res.status(400).json({ message: 'Invalid amount' });
+        console.log("amount");
         return;
     }
     try {
-        const updatedUser = await prisma.user.update({
+        const updatedUser = await prisma.account.update({
             where: { id: req.userId },
             data: { cyberCoins: { increment: amount } },
             select: {
                 id: true,
-                username: true,
+                // username: true,
                 cyberCoins: true
             }
         });

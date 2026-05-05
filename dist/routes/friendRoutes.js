@@ -12,4 +12,5 @@ router.post("/accept", authMiddleware_1.verifyToken, FriendController_1.acceptRe
 router.post("/decline", authMiddleware_1.verifyToken, FriendController_1.declineRequest);
 router.get("/pending", authMiddleware_1.verifyToken, FriendController_1.getPendingRequests);
 router.get("/list", authMiddleware_1.verifyToken, FriendController_1.getFriends);
+router.get('/request-status/:userId', authMiddleware_1.verifyToken, FriendController_1.getRequestStatus);
 exports.default = router;

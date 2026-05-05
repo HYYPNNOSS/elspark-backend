@@ -5,42 +5,32 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 // routes/postRouter.ts
 const express_1 = __importDefault(require("express"));
-const multer_1 = __importDefault(require("multer"));
-const path_1 = __importDefault(require("path"));
 const authMiddleware_1 = require("../middlewares/authMiddleware");
 const client_1 = require("@prisma/client");
 const postRouter = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
-const storage = multer_1.default.diskStorage({
-    destination: (_req, file, cb) => {
-        cb(null, "uploads/");
-    },
-    filename: (_req, file, cb) => {
-        const ext = path_1.default.extname(file.originalname);
-        cb(null, `${Date.now()}-${file.fieldname}${ext}`);
-    },
-});
-const upload = (0, multer_1.default)({ storage });
-postRouter.post("/", authMiddleware_1.verifyToken, upload.fields([
+const wasabi_config_1 = require("../config/wasabi-config");
+postRouter.post("/", authMiddleware_1.verifyToken, wasabi_config_1.postMediaUpload.fields([
     { name: "image", maxCount: 1 },
     { name: "video", maxCount: 1 },
 ]), async (req, res) => {
-    const { text, isPrivate } = req.body;
+    const { text, title, isPrivate } = req.body;
     const user = req.user;
     if (!user?.id) {
-        // const response = res.status(401).json({ error: "Unauthorized" });
-        // return response;
+        res.status(401).json({ error: "Unauthorized" });
+        return;
     }
     try {
         const files = req.files;
         const imageFile = files?.["image"]?.[0];
         const videoFile = files?.["video"]?.[0];
-        const imageUrl = imageFile ? `/uploads/${imageFile.filename}` : null;
-        const videoUrl = videoFile ? `/uploads/${videoFile.filename}` : null;
-        // console.log(!user?.id)
+        // Extract the key from location and prepend /elspark
+        const imageUrl = imageFile ? imageFile.key : null;
+        const videoUrl = videoFile ? videoFile.key : null;
         const newPost = await prisma.post.create({
             data: {
                 text,
+                title,
                 imageUrl,
                 videoUrl,
                 isPrivate: isPrivate === "true",
@@ -60,6 +50,321 @@ postRouter.post("/", authMiddleware_1.verifyToken, upload.fields([
     }
     catch (error) {
         console.error("Failed to create post:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+postRouter.get("/:id", authMiddleware_1.verifyToken, async (req, res) => {
+    const { id } = req.params;
+    console.log("heyy");
+    const postId = parseInt(id);
+    if (!postId || isNaN(postId)) {
+        res.status(400).json({ error: "Invalid post ID" });
+        return;
+    }
+    try {
+        const post = await prisma.post.findUnique({
+            where: {
+                id: postId,
+            },
+            include: {
+                author: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profilePicture: true,
+                        bio: true,
+                        createdAt: true,
+                    },
+                },
+                coowners: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                profilePicture: true,
+                            },
+                        },
+                    },
+                },
+                collections: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                            },
+                        },
+                    },
+                },
+                comments: {
+                    where: {
+                        parentId: null,
+                    },
+                    include: {
+                        author: {
+                            select: {
+                                id: true,
+                                username: true,
+                                profilePicture: true,
+                            },
+                        },
+                        replies: {
+                            include: {
+                                author: {
+                                    select: {
+                                        id: true,
+                                        username: true,
+                                        profilePicture: true,
+                                    },
+                                },
+                                replies: {
+                                    include: {
+                                        author: {
+                                            select: {
+                                                id: true,
+                                                username: true,
+                                                profilePicture: true,
+                                            },
+                                        },
+                                    },
+                                    orderBy: {
+                                        createdAt: "asc",
+                                    },
+                                },
+                            },
+                            orderBy: {
+                                createdAt: "asc",
+                            },
+                        },
+                    },
+                    orderBy: {
+                        createdAt: "desc",
+                    },
+                },
+                // Post in collections relationship
+                PostInCollection: {
+                    include: {
+                        collection: {
+                            select: {
+                                id: true,
+                                title: true,
+                                userId: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        if (!post) {
+            res.status(404).json({ error: "Post not found" });
+            return;
+        }
+        // Optional: Check if post is private and user has access
+        const user = req.user;
+        if (post.isPrivate) {
+            const hasAccess = user?.id === post.authorId || // Author
+                post.coowners.some(coowner => coowner.userId === user?.id); // Co-owner
+            if (!hasAccess) {
+                res.status(403).json({ error: "Access denied to private post" });
+                return;
+            }
+        }
+        // Add some computed fields for convenience
+        const enrichedPost = {
+            ...post,
+            stats: {
+                commentCount: await prisma.comment.count({
+                    where: { postId: post.id },
+                }),
+                coownerCount: post.coowners.length,
+                collectionCount: post.collections.length,
+            },
+            hasMedia: {
+                hasImage: !!post.imageUrl,
+                hasVideo: !!post.videoUrl,
+            },
+        };
+        res.status(200).json(enrichedPost);
+    }
+    catch (error) {
+        console.error("Failed to fetch post:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+// Add to postRouter.ts
+postRouter.delete("/:id", authMiddleware_1.verifyToken, async (req, res) => {
+    const { id } = req.params;
+    const user = req.user;
+    const postId = parseInt(id);
+    if (!postId || isNaN(postId)) {
+        res.status(400).json({ error: "Invalid post ID" });
+        return;
+    }
+    try {
+        // Find the post and check ownership - INCLUDE AUTHOR
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                author: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profilePicture: true,
+                    },
+                },
+                coowners: true,
+            },
+        });
+        if (!post) {
+            res.status(404).json({ error: "Post not found" });
+            return;
+        }
+        // Check if user is owner or coowner
+        const isOwner = post.authorId === user.id;
+        const isCoowner = post.coowners.some(co => co.userId === user.id);
+        if (!isOwner && !isCoowner) {
+            res.status(403).json({ error: "Unauthorized to delete this post" });
+            return;
+        }
+        // If user is a coowner, just remove them from coowners
+        if (isCoowner && !isOwner) {
+            await prisma.postCoowner.delete({
+                where: {
+                    postId_userId: {
+                        postId: postId,
+                        userId: user.id,
+                    },
+                },
+            });
+            res.status(200).json({
+                message: "Removed from coowners successfully",
+                isAnonymized: false
+            });
+            return;
+        }
+        // If user is the original author, anonymize the post
+        if (isOwner) {
+            // Remove all coowners
+            await prisma.postCoowner.deleteMany({
+                where: { postId: postId },
+            });
+            // Update post to be anonymous
+            const updatedPost = await prisma.post.update({
+                where: { id: postId },
+                data: {
+                    isAnonymous: true,
+                    originalAuthorId: post.authorId,
+                    deletedAt: new Date(),
+                },
+            });
+            res.status(200).json({
+                message: "Post anonymized successfully",
+                isAnonymized: true,
+                post: updatedPost
+            });
+            return;
+        }
+    }
+    catch (error) {
+        console.error("Failed to delete/anonymize post:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+// Alternative version that gets ALL comments in a flat structure (if you prefer)
+postRouter.get("/:id/with-flat-comments", authMiddleware_1.verifyToken, async (req, res) => {
+    const { id } = req.params;
+    const postId = parseInt(id);
+    if (!postId || isNaN(postId)) {
+        res.status(400).json({ error: "Invalid post ID" });
+        return;
+    }
+    try {
+        const post = await prisma.post.findUnique({
+            where: {
+                id: postId,
+            },
+            include: {
+                author: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profilePicture: true,
+                        bio: true,
+                    },
+                },
+                coowners: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                profilePicture: true,
+                            },
+                        },
+                    },
+                },
+                collections: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        if (!post) {
+            res.status(404).json({ error: "Post not found" });
+            return;
+        }
+        // Get all comments for this post in a flat structure
+        const allComments = await prisma.comment.findMany({
+            where: {
+                postId: post.id,
+            },
+            include: {
+                author: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profilePicture: true,
+                    },
+                },
+            },
+            orderBy: {
+                createdAt: "asc",
+            },
+        });
+        // Check privacy access
+        const user = req.user;
+        if (post.isPrivate) {
+            const hasAccess = user?.id === post.authorId ||
+                post.coowners.some(coowner => coowner.userId === user?.id);
+            if (!hasAccess) {
+                res.status(403).json({ error: "Access denied to private post" });
+                return;
+            }
+        }
+        const response = {
+            ...post,
+            comments: allComments,
+            stats: {
+                commentCount: allComments.length,
+                coownerCount: post.coowners.length,
+                collectionCount: post.collections.length,
+            },
+            hasMedia: {
+                hasImage: !!post.imageUrl,
+                hasVideo: !!post.videoUrl,
+            },
+        };
+        res.status(200).json(response);
+    }
+    catch (error) {
+        console.error("Failed to fetch post:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });

@@ -3,60 +3,79 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// ./routes/userRoutes.ts
 const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
 const authMiddleware_1 = require("../middlewares/authMiddleware");
-const multer_1 = __importDefault(require("multer"));
-const path_1 = __importDefault(require("path"));
-// Configure multer for profile picture uploads
-const storage = multer_1.default.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, "uploads/profiles"); // Make sure this directory exists
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-        cb(null, "profile-" + uniqueSuffix + path_1.default.extname(file.originalname));
-    },
-});
-const upload = (0, multer_1.default)({
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith("image/")) {
-            cb(null, true);
-        }
-        else {
-            cb(new Error("Only image files are allowed"));
-        }
-    },
-});
+const wasabi_config_1 = require("../config/wasabi-config");
 const router = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
 router.get("/", async (req, res) => {
     try {
-        const users = await prisma.user.findMany({
+        const profiles = await prisma.profile.findMany({
             select: {
                 id: true,
                 username: true,
-                email: true,
                 bio: true,
                 profilePicture: true,
+                accountId: true,
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
             },
         });
-        // console.log(users);
-        res.json(users);
+        res.json(profiles);
     }
     catch (error) {
-        console.error("Error fetching users:", error);
+        console.error("Error fetching profiles:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+router.get("/me", authMiddleware_1.verifyToken, async (req, res) => {
+    try {
+        const profileId = req.user.profileId || req.user.id;
+        const profile = await prisma.profile.findUnique({
+            where: { id: profileId },
+            include: {
+                account: {
+                    select: {
+                        id: true,
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
+            },
+        });
+        if (!profile) {
+            res.status(404).json({ error: "Profile not found" });
+            return;
+        }
+        res.status(200).json({
+            user: {
+                id: profile.id,
+                accountId: profile.accountId,
+                username: profile.username,
+                email: profile.account.email,
+                profilePicture: profile.profilePicture,
+                bio: profile.bio,
+                cyberCoins: Number(profile.account.cyberCoins),
+                online: profile.online,
+                isApproved: profile.isApproved,
+            },
+        });
+    }
+    catch (error) {
+        console.error("Error fetching current user:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });
 router.get("/notifications", authMiddleware_1.verifyToken, async (req, res) => {
     try {
-        const userId = req.user.id; // now safe because verifyToken runs first
+        const profileId = req.user.profileId || req.user.id;
         const notifications = await prisma.notification.findMany({
-            where: { userId },
+            where: { profileId: profileId },
             orderBy: { createdAt: "desc" },
         });
         res.status(200).json(notifications);
@@ -75,6 +94,7 @@ router.get("/public_post", async (req, res) => {
                 text: true,
                 imageUrl: true,
                 videoUrl: true,
+                isAnonymous: true,
                 createdAt: true,
                 updatedAt: true,
                 author: {
@@ -97,64 +117,33 @@ router.get("/public_post", async (req, res) => {
 router.get("/id/:id", async (req, res) => {
     const { id } = req.params;
     try {
-        const user = await prisma.user.findUnique({
+        const profile = await prisma.profile.findUnique({
             where: { id: Number(id) },
             select: {
                 id: true,
                 username: true,
-                email: true,
-                profilePicture: true,
-                createdAt: true,
-                updatedAt: true,
-                online: true,
-                isonrand: true,
-                looking: true,
-                posts: {
-                    select: {
-                        id: true,
-                        text: true,
-                        imageUrl: true,
-                        isPrivate: true,
-                        createdAt: true,
-                        updatedAt: true,
-                    },
-                    orderBy: { createdAt: "desc" },
-                },
-            },
-        });
-        if (!user) {
-            res.status(404).json({ error: "User not found" });
-            return;
-        }
-        res.json({ user });
-    }
-    catch (err) {
-        console.error("Error fetching user by ID:", err);
-        res.status(500).json({ error: "Internal server error" });
-    }
-});
-router.get("/:username", async (req, res) => {
-    const { username } = req.params;
-    try {
-        const user = await prisma.user.findUnique({
-            where: { username },
-            select: {
-                id: true,
-                username: true,
-                email: true,
                 profilePicture: true,
                 bio: true,
                 createdAt: true,
                 updatedAt: true,
                 online: true,
                 isonrand: true,
-                cyberCoins: true,
                 looking: true,
+                accountId: true,
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
                 posts: {
                     select: {
                         id: true,
+                        title: true,
                         text: true,
                         imageUrl: true,
+                        videoUrl: true,
+                        isAnonymous: true,
                         isPrivate: true,
                         createdAt: true,
                         updatedAt: true,
@@ -163,11 +152,93 @@ router.get("/:username", async (req, res) => {
                 },
             },
         });
-        if (!user) {
+        if (!profile) {
+            res.status(404).json({ error: "Profile not found" });
+            return;
+        }
+        res.json({
+            user: {
+                id: profile.id,
+                accountId: profile.accountId,
+                username: profile.username,
+                email: profile.account.email,
+                profilePicture: profile.profilePicture,
+                bio: profile.bio,
+                cyberCoins: Number(profile.account.cyberCoins),
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                online: profile.online,
+                isonrand: profile.isonrand,
+                looking: profile.looking,
+                posts: profile.posts,
+            },
+        });
+    }
+    catch (err) {
+        console.error("Error fetching profile by ID:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+router.get("/:username", async (req, res) => {
+    const { username } = req.params;
+    try {
+        const profile = await prisma.profile.findUnique({
+            where: { username },
+            select: {
+                id: true,
+                username: true,
+                profilePicture: true,
+                bio: true,
+                createdAt: true,
+                updatedAt: true,
+                online: true,
+                isonrand: true,
+                looking: true,
+                isApproved: true,
+                accountId: true,
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
+                posts: {
+                    select: {
+                        id: true,
+                        text: true,
+                        imageUrl: true,
+                        videoUrl: true,
+                        isAnonymous: true,
+                        isPrivate: true,
+                        createdAt: true,
+                        updatedAt: true,
+                    },
+                    orderBy: { createdAt: "desc" },
+                },
+            },
+        });
+        if (!profile) {
             res.status(404).json({ error: "User not found" });
             return;
         }
-        res.status(200).json({ user });
+        res.status(200).json({
+            user: {
+                id: profile.id,
+                accountId: profile.accountId,
+                username: profile.username,
+                email: profile.account.email,
+                profilePicture: profile.profilePicture,
+                bio: profile.bio,
+                cyberCoins: Number(profile.account.cyberCoins),
+                createdAt: profile.createdAt,
+                updatedAt: profile.updatedAt,
+                online: profile.online,
+                isonrand: profile.isonrand,
+                looking: profile.looking,
+                isApproved: profile.isApproved,
+                posts: profile.posts,
+            },
+        });
     }
     catch (err) {
         console.error("Error:", err);
@@ -176,8 +247,7 @@ router.get("/:username", async (req, res) => {
 });
 router.post("/send-coins", authMiddleware_1.verifyToken, async (req, res) => {
     const { recipientId, amount } = req.body;
-    const senderId = req.user.id;
-    // Validation
+    const senderProfileId = req.user.profileId || req.user.id;
     if (!recipientId || !amount) {
         res.status(400).json({ error: "Recipient ID and amount are required" });
         return;
@@ -186,58 +256,58 @@ router.post("/send-coins", authMiddleware_1.verifyToken, async (req, res) => {
         res.status(400).json({ error: "Amount must be a positive number" });
         return;
     }
-    if (senderId === recipientId) {
+    if (senderProfileId === recipientId) {
         res.status(400).json({ error: "Cannot send coins to yourself" });
         return;
     }
-    // Round to 2 decimal places to handle floating point precision
     const roundedAmount = Math.round(amount * 100) / 100;
     try {
-        // Check if recipient exists
-        const recipient = await prisma.user.findUnique({
-            where: { id: recipientId },
-            select: { id: true, username: true, cyberCoins: true },
+        const senderProfile = await prisma.profile.findUnique({
+            where: { id: senderProfileId },
+            include: { account: true },
         });
-        if (!recipient) {
+        if (!senderProfile) {
+            res.status(404).json({ error: "Sender profile not found" });
+            return;
+        }
+        const recipientProfile = await prisma.profile.findUnique({
+            where: { id: recipientId },
+            include: { account: true },
+        });
+        if (!recipientProfile) {
             res.status(404).json({ error: "Recipient not found" });
             return;
         }
-        // Check sender's balance
-        const sender = await prisma.user.findUnique({
-            where: { id: senderId },
-            select: { id: true, username: true, cyberCoins: true },
-        });
-        if (!sender) {
-            res.status(404).json({ error: "Sender not found" });
+        if (senderProfile.accountId === recipientProfile.accountId) {
+            res
+                .status(400)
+                .json({ error: "Cannot transfer coins between your own profiles" });
             return;
         }
-        if (sender.cyberCoins < roundedAmount) {
+        const senderCoins = Number(senderProfile.account.cyberCoins);
+        if (senderCoins < roundedAmount) {
             res.status(400).json({ error: "Insufficient cyber coins" });
             return;
         }
-        // Perform the transaction
         await prisma.$transaction([
-            // Deduct from sender
-            prisma.user.update({
-                where: { id: senderId },
+            prisma.account.update({
+                where: { id: senderProfile.accountId },
                 data: { cyberCoins: { decrement: roundedAmount } },
             }),
-            // Add to recipient
-            prisma.user.update({
-                where: { id: recipientId },
+            prisma.account.update({
+                where: { id: recipientProfile.accountId },
                 data: { cyberCoins: { increment: roundedAmount } },
             }),
         ]);
-        // Get updated balances
-        const updatedSender = await prisma.user.findUnique({
-            where: { id: senderId },
+        const updatedSenderAccount = await prisma.account.findUnique({
+            where: { id: senderProfile.accountId },
             select: { cyberCoins: true },
         });
         res.status(200).json({
-            message: `Successfully sent ${roundedAmount} cyber coins to ${recipient.username}`,
-            senderBalance: updatedSender?.cyberCoins,
+            message: `Successfully sent ${roundedAmount} cyber coins to ${recipientProfile.username}`,
+            senderBalance: updatedSenderAccount?.cyberCoins,
             amountSent: roundedAmount,
-            recipient: recipient.username,
+            recipient: recipientProfile.username,
         });
     }
     catch (error) {
@@ -248,28 +318,35 @@ router.post("/send-coins", authMiddleware_1.verifyToken, async (req, res) => {
 router.put("/:id/bio", authMiddleware_1.verifyToken, async (req, res) => {
     const { id } = req.params;
     const { bio } = req.body;
-    const userId = req.user.id;
-    // Check if user is updating their own bio
-    if (parseInt(id) !== userId) {
+    const profileId = req.user.profileId || req.user.id;
+    if (parseInt(id) !== profileId) {
         res.status(403).json({ error: "You can only update your own bio" });
         return;
     }
     try {
-        const updatedUser = await prisma.user.update({
+        const updatedProfile = await prisma.profile.update({
             where: { id: parseInt(id) },
             data: { bio },
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                bio: true,
-                profilePicture: true,
-                cyberCoins: true,
+            include: {
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
             },
         });
         res.status(200).json({
             message: "Bio updated successfully",
-            user: updatedUser,
+            user: {
+                id: updatedProfile.id,
+                accountId: updatedProfile.accountId,
+                username: updatedProfile.username,
+                email: updatedProfile.account.email,
+                bio: updatedProfile.bio,
+                profilePicture: updatedProfile.profilePicture,
+                cyberCoins: Number(updatedProfile.account.cyberCoins),
+            },
         });
     }
     catch (error) {
@@ -277,11 +354,10 @@ router.put("/:id/bio", authMiddleware_1.verifyToken, async (req, res) => {
         res.status(500).json({ error: "Internal server error" });
     }
 });
-router.put("/:id/profile-picture", authMiddleware_1.verifyToken, upload.single("profilePicture"), async (req, res) => {
+router.put("/:id/profile-picture", authMiddleware_1.verifyToken, wasabi_config_1.profilePictureUpload.single("profilePicture"), async (req, res) => {
     const { id } = req.params;
-    const userId = req.user.id;
-    // Check if user is updating their own profile picture
-    if (parseInt(id) !== userId) {
+    const profileId = req.user.profileId || req.user.id;
+    if (parseInt(id) !== profileId) {
         res
             .status(403)
             .json({ error: "You can only update your own profile picture" });
@@ -292,22 +368,36 @@ router.put("/:id/profile-picture", authMiddleware_1.verifyToken, upload.single("
         return;
     }
     try {
-        const profilePicturePath = `/uploads/profiles/${req.file.filename}`;
-        const updatedUser = await prisma.user.update({
+        const profilePicturePath = req.file.location;
+        const prefix = "https://elspark.s3.eu-west-1.wasabisys.com";
+        let path = profilePicturePath;
+        if (path.startsWith(prefix)) {
+            path = path.substring(prefix.length);
+        }
+        console.log(path);
+        const updatedProfile = await prisma.profile.update({
             where: { id: parseInt(id) },
-            data: { profilePicture: profilePicturePath },
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                bio: true,
-                profilePicture: true,
-                cyberCoins: true,
+            data: { profilePicture: path },
+            include: {
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
             },
         });
         res.status(200).json({
             message: "Profile picture updated successfully",
-            user: updatedUser,
+            user: {
+                id: updatedProfile.id,
+                accountId: updatedProfile.accountId,
+                username: updatedProfile.username,
+                email: updatedProfile.account.email,
+                bio: updatedProfile.bio,
+                profilePicture: updatedProfile.profilePicture,
+                cyberCoins: Number(updatedProfile.account.cyberCoins),
+            },
             profilePictureUrl: profilePicturePath,
         });
     }
@@ -319,16 +409,18 @@ router.put("/:id/profile-picture", authMiddleware_1.verifyToken, upload.single("
 router.get("/:username/posts", async (req, res) => {
     const { username } = req.params;
     try {
-        const user = await prisma.user.findUnique({
+        const profile = await prisma.profile.findUnique({
             where: { username },
             select: {
                 posts: {
                     select: {
                         id: true,
+                        title: true,
                         text: true,
                         imageUrl: true,
                         videoUrl: true,
                         isPrivate: true,
+                        isAnonymous: true,
                         createdAt: true,
                         updatedAt: true,
                         author: {
@@ -343,23 +435,47 @@ router.get("/:username/posts", async (req, res) => {
                 },
             },
         });
-        if (!user) {
+        if (!profile) {
             res.status(404).json({ error: "User not found" });
             return;
         }
-        res.status(200).json(user.posts);
+        res.status(200).json(profile.posts);
     }
     catch (err) {
         console.error("Error:", err);
         res.status(500).json({ error: "Internal server error" });
     }
 });
-router.put("/:id", authMiddleware_1.verifyToken, upload.single("profilePicture"), async (req, res) => {
+router.get("/profile-picture/:id", async (req, res) => {
     const { id } = req.params;
-    const userId = req.user.id;
+    try {
+        const profile = await prisma.profile.findUnique({
+            where: { id: Number(id) },
+            select: {
+                id: true,
+                profilePicture: true,
+            },
+        });
+        if (!profile) {
+            res.status(404).json({ error: "Profile not found" });
+            return;
+        }
+        res.status(200).json({
+            id: profile.id,
+            profilePicture: profile.profilePicture,
+        });
+    }
+    catch (err) {
+        console.error("Error fetching profile picture:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+router.put("/:id", authMiddleware_1.verifyToken, wasabi_config_1.profilePictureUpload.single("profilePicture"), async (req, res) => {
+    const { id } = req.params;
+    const profileId = req.user.profileId || req.user.id;
     const bio = req.body.bio;
     const profilePictureFile = req.file;
-    if (parseInt(id) !== userId) {
+    if (parseInt(id) !== profileId) {
         res.status(403).json({ error: "You can only update your own profile" });
         return;
     }
@@ -367,24 +483,32 @@ router.put("/:id", authMiddleware_1.verifyToken, upload.single("profilePicture")
     if (bio !== undefined)
         updateData.bio = bio;
     if (profilePictureFile) {
-        updateData.profilePicture = `/uploads/profiles/${profilePictureFile.filename}`;
+        updateData.profilePicture = profilePictureFile.location;
     }
     try {
-        const updatedUser = await prisma.user.update({
+        const updatedProfile = await prisma.profile.update({
             where: { id: parseInt(id) },
             data: updateData,
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                bio: true,
-                profilePicture: true,
-                cyberCoins: true,
+            include: {
+                account: {
+                    select: {
+                        email: true,
+                        cyberCoins: true,
+                    },
+                },
             },
         });
         res.status(200).json({
             message: "Profile updated successfully",
-            user: updatedUser,
+            user: {
+                id: updatedProfile.id,
+                accountId: updatedProfile.accountId,
+                username: updatedProfile.username,
+                email: updatedProfile.account.email,
+                bio: updatedProfile.bio,
+                profilePicture: updatedProfile.profilePicture,
+                cyberCoins: Number(updatedProfile.account.cyberCoins),
+            },
         });
     }
     catch (error) {

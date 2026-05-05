@@ -6,34 +6,37 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
 const authMiddleware_1 = require("../middlewares/authMiddleware");
+const notificationsRoutes_1 = require("./notificationsRoutes");
 const router = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
-// Add coowner to a post (requires 1 cyber coin payment to post owner)
 router.post("/coown/:postId", authMiddleware_1.verifyToken, async (req, res) => {
-    const userId = req.user.id;
+    const profileId = req.user.profileId || req.user.id;
     const postId = Number(req.params.postId);
-    const coinAmount = 1; // Fixed amount for co-owning
+    const coinAmount = 1;
     try {
-        // Get the post with author information
         const post = await prisma.post.findUnique({
             where: { id: postId },
-            include: { author: true },
+            include: {
+                author: {
+                    include: {
+                        account: true
+                    }
+                }
+            },
         });
         if (!post) {
             res.status(404).json({ error: "Post not found" });
             return;
         }
-        // Check if user is trying to co-own their own post
-        if (post.authorId === userId) {
+        if (post.authorId === profileId) {
             res.status(400).json({ error: "Cannot co-own your own post" });
             return;
         }
-        // Check if user already co-owns this post
         const existingCoowner = await prisma.postCoowner.findUnique({
             where: {
                 postId_userId: {
                     postId: postId,
-                    userId: userId,
+                    userId: profileId,
                 },
             },
         });
@@ -41,49 +44,48 @@ router.post("/coown/:postId", authMiddleware_1.verifyToken, async (req, res) => 
             res.status(400).json({ error: "Already a co-owner of this post" });
             return;
         }
-        // Get current user's balance
-        const currentUser = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { id: true, username: true, cyberCoins: true },
+        const currentProfile = await prisma.profile.findUnique({
+            where: { id: profileId },
+            include: { account: true },
         });
-        if (!currentUser) {
-            res.status(404).json({ error: "User not found" });
+        if (!currentProfile) {
+            res.status(404).json({ error: "Profile not found" });
             return;
         }
-        // Check if user has enough cyber coins
-        if (currentUser.cyberCoins < coinAmount) {
-            res
-                .status(400)
-                .json({
+        const currentUserCoins = Number(currentProfile.account.cyberCoins);
+        if (currentUserCoins < coinAmount) {
+            res.status(400).json({
                 error: "Insufficient cyber coins. You need 1 cyber coin to co-own this post.",
             });
             return;
         }
-        // Perform the transaction: transfer coin and create co-ownership
+        if (currentProfile.accountId === post.author.accountId) {
+            res.status(400).json({
+                error: "Cannot co-own posts from your other profiles"
+            });
+            return;
+        }
         await prisma.$transaction([
-            // Deduct coin from current user
-            prisma.user.update({
-                where: { id: userId },
+            prisma.account.update({
+                where: { id: currentProfile.accountId },
                 data: { cyberCoins: { decrement: coinAmount } },
             }),
-            // Add coin to post owner
-            prisma.user.update({
-                where: { id: post.authorId },
+            prisma.account.update({
+                where: { id: post.author.accountId },
                 data: { cyberCoins: { increment: coinAmount } },
             }),
-            // Create co-ownership record
             prisma.postCoowner.create({
-                data: { postId, userId },
+                data: { postId, userId: profileId },
             }),
         ]);
-        // Get updated balance for response
-        const updatedUser = await prisma.user.findUnique({
-            where: { id: userId },
+        const updatedAccount = await prisma.account.findUnique({
+            where: { id: currentProfile.accountId },
             select: { cyberCoins: true },
         });
+        await (0, notificationsRoutes_1.createNotification)('coowner', `${currentProfile.username} purchased a copy of your digi-post`, post.authorId, undefined, undefined, `/profile/${currentProfile.username}`);
         res.json({
             message: `You now co-own this post! 1 cyber coin sent to ${post.author.username}`,
-            yourBalance: updatedUser?.cyberCoins,
+            yourBalance: updatedAccount?.cyberCoins,
             coinsSent: coinAmount,
             postOwner: post.author.username,
         });
@@ -103,6 +105,7 @@ router.get("/coowned/:targetId", authMiddleware_1.verifyToken, async (req, res) 
                     select: {
                         id: true,
                         text: true,
+                        title: true,
                         imageUrl: true,
                         videoUrl: true,
                         isPrivate: true,

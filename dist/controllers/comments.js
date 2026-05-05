@@ -2,12 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPostComments = exports.createComment = void 0;
 const client_1 = require("@prisma/client");
+const notificationsRoutes_1 = require("../routes/notificationsRoutes");
 const prisma = new client_1.PrismaClient();
 const createComment = async (req, res) => {
     try {
         const { content, postId, parentId } = req.body;
         const userId = req.user.id;
-        // Validate input
         if (!content || !content.trim()) {
             res.status(400).json({ error: 'Comment content is required' });
             return;
@@ -16,7 +16,6 @@ const createComment = async (req, res) => {
             res.status(400).json({ error: 'Either postId or parentId is required' });
             return;
         }
-        // Ensure parent comment exists if replying
         if (parentId) {
             const parentExists = await prisma.comment.findUnique({
                 where: { id: parentId }
@@ -29,7 +28,7 @@ const createComment = async (req, res) => {
         const comment = await prisma.comment.create({
             data: {
                 content,
-                postId: parentId ? null : postId, // Only set postId for top-level
+                postId: parentId ? null : postId,
                 parentId: parentId || null,
                 authorId: userId
             },
@@ -46,25 +45,41 @@ const createComment = async (req, res) => {
                 replies: true
             }
         });
-        if (postId && !parentId) {
-            // Top-level comment on a post → notify post author
-            const post = await prisma.post.findUnique({
-                where: { id: postId },
-                select: { authorId: true }
-            });
-            if (post && post.authorId !== userId) {
-                await prisma.notification.create({
-                    data: {
-                        type: "comment",
-                        message: `New comment on your post: "${comment.content}"`,
-                        userId: post.authorId,
-                        postId: postId.toString(),
-                        commentId: comment.id.toString()
-                    }
-                });
-            }
-        }
         res.status(201).json(comment);
+        (async () => {
+            try {
+                const commenter = await prisma.profile.findUnique({
+                    where: { id: userId },
+                    select: { username: true }
+                });
+                if (!commenter)
+                    return;
+                if (postId && !parentId) {
+                    const post = await prisma.post.findUnique({
+                        where: { id: postId },
+                        select: { authorId: true }
+                    });
+                    if (post && post.authorId !== userId) {
+                        await (0, notificationsRoutes_1.createNotification)('comment', `${commenter.username} commented on your post`, post.authorId, String(postId), String(comment.id), `/profile/post/${postId}`);
+                    }
+                }
+                else if (parentId) {
+                    const parentComment = await prisma.comment.findUnique({
+                        where: { id: parentId },
+                        select: { authorId: true, postId: true }
+                    });
+                    if (parentComment && parentComment.authorId !== userId) {
+                        const actualPostId = parentComment.postId || postId;
+                        if (actualPostId) {
+                            await (0, notificationsRoutes_1.createNotification)('reply', `${commenter.username} replied to your comment`, parentComment.authorId, String(actualPostId), String(comment.id), `/profile/post/${actualPostId}`);
+                        }
+                    }
+                }
+            }
+            catch (notificationError) {
+                console.error('Failed to create notification:', notificationError);
+            }
+        })();
     }
     catch (error) {
         console.error('Error creating comment:', error);

@@ -5,45 +5,47 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
-const aiMiddleware_1 = require("../middlewares/aiMiddleware");
+const authMiddleware_1 = require("../middlewares/authMiddleware");
 const router = express_1.default.Router();
 const prisma = new client_1.PrismaClient();
-// POST /api/ai-sessions - Create new AI session
-router.post('/', aiMiddleware_1.aiMiddleware, async (req, res) => {
+router.post('/', authMiddleware_1.verifyToken, async (req, res) => {
     try {
         const { botId, duration, cost } = req.body;
-        const userId = req.user.userId;
-        console.log("userId");
-        console.log(userId);
-        console.log("userId");
-        if (!req.user) {
+        const profileId = req.user?.profileId || req.user?.userId;
+        const accountId = req.user?.accountId;
+        console.log("profileId:", profileId);
+        console.log("accountId:", accountId);
+        if (!req.user || !profileId) {
             console.log("Unauthorized: no user in request");
             res.status(401).json({ error: 'Unauthorized: no user in request' });
             return;
         }
-        // Check user has enough coins
-        const user = await prisma.user.findUnique({
-            where: { id: userId }
+        const profile = await prisma.profile.findUnique({
+            where: { id: profileId },
+            include: { account: true }
         });
-        if (!user || user.cyberCoins < cost) {
+        if (!profile) {
+            res.status(404).json({ error: 'Profile not found' });
+            return;
+        }
+        const userCoins = profile.account.cyberCoins ? Number(profile.account.cyberCoins) : 0;
+        if (userCoins < cost) {
             res.status(400).json({ error: 'Insufficient coins' });
             return;
         }
-        // Create AI session
         const endTime = new Date(Date.now() + duration * 60 * 1000);
         const session = await prisma.aISession.create({
             data: {
-                userId,
+                profileId: profileId,
                 botId,
                 duration,
                 endTime,
                 isActive: true
             }
         });
-        // Deduct coins
-        await prisma.user.update({
-            where: { id: userId },
-            data: { cyberCoins: user.cyberCoins - cost }
+        await prisma.account.update({
+            where: { id: profile.accountId },
+            data: { cyberCoins: { decrement: cost } }
         });
         res.json({
             sessionId: session.id,
@@ -55,10 +57,13 @@ router.post('/', aiMiddleware_1.aiMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-// GET /api/ai-sessions/active - Get user's active sessions
-router.get('/active', aiMiddleware_1.aiMiddleware, async (req, res) => {
+router.get('/active', authMiddleware_1.verifyToken, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const profileId = req.user?.profileId || req.user?.userId;
+        if (!profileId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
         const now = new Date();
         const BOT_CONFIG = {
             1: { name: "Aero", emoji: "🧠" },
@@ -66,15 +71,13 @@ router.get('/active', aiMiddleware_1.aiMiddleware, async (req, res) => {
             3: { name: "OneRoid", emoji: "🌙" },
             4: { name: "Zainab", emoji: "🏊‍♀️" }
         };
-        // Get active sessions
         const sessions = await prisma.aISession.findMany({
             where: {
-                userId,
+                profileId: profileId,
                 isActive: true,
                 endTime: { gt: now }
             }
         });
-        // Format for frontend
         const aiBots = sessions.map((session) => ({
             id: session.botId,
             name: BOT_CONFIG[session.botId]?.name || 'Unknown',
@@ -89,7 +92,87 @@ router.get('/active', aiMiddleware_1.aiMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-// POST /api/ai-sessions/cleanup - Cleanup expired sessions
+router.get('/history/:botId', authMiddleware_1.verifyToken, async (req, res) => {
+    try {
+        const { botId } = req.params;
+        const profileId = req.user?.profileId || req.user?.userId;
+        if (!profileId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const sessions = await prisma.aISession.findMany({
+            where: {
+                profileId: profileId,
+                botId: parseInt(botId)
+            },
+            orderBy: { startTime: 'desc' }
+        });
+        res.json({
+            hasHistory: sessions.length > 0,
+            sessions: sessions.map(s => ({
+                id: s.id,
+                startTime: s.startTime,
+                endTime: s.endTime,
+                isActive: s.isActive,
+                duration: s.duration
+            }))
+        });
+    }
+    catch (error) {
+        console.error('Error fetching session history:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+router.post('/extend', authMiddleware_1.verifyToken, async (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        const profileId = req.user?.profileId || req.user?.userId;
+        const extensionMinutes = 5;
+        const extensionCost = 1;
+        if (!profileId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const session = await prisma.aISession.findUnique({
+            where: { id: sessionId },
+            include: { profile: { include: { account: true } } }
+        });
+        if (!session) {
+            res.status(404).json({ error: 'Session not found' });
+            return;
+        }
+        if (session.profileId !== profileId) {
+            res.status(403).json({ error: 'Unauthorized to extend this session' });
+            return;
+        }
+        const userCoins = session.profile.account.cyberCoins ? Number(session.profile.account.cyberCoins) : 0;
+        if (userCoins < extensionCost) {
+            res.status(400).json({ error: 'Insufficient coins' });
+            return;
+        }
+        const newEndTime = new Date(session.endTime.getTime() + extensionMinutes * 60 * 1000);
+        const updatedSession = await prisma.aISession.update({
+            where: { id: sessionId },
+            data: {
+                endTime: newEndTime,
+                duration: session.duration + extensionMinutes,
+                isActive: true
+            }
+        });
+        await prisma.account.update({
+            where: { id: session.profile.accountId },
+            data: { cyberCoins: { decrement: extensionCost } }
+        });
+        res.json({
+            message: 'Session extended successfully',
+            session: updatedSession
+        });
+    }
+    catch (error) {
+        console.error('Error extending session:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 router.post('/cleanup', async (req, res) => {
     try {
         const now = new Date();

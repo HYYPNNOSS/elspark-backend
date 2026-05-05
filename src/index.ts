@@ -42,7 +42,11 @@ import path from "path";
 import adminRoutes from "./routes/adminRoutes";
 import notificationsRouter from "./routes/notificationsRoutes";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const stripeApiKey = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn("⚠️ STRIPE_SECRET_KEY is missing in environment variables. Stripe payments will fail.");
+}
+const stripe = new Stripe(stripeApiKey, {
   apiVersion: '2025-08-27.basil',
 });
 
